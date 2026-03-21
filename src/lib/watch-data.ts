@@ -176,6 +176,27 @@ function randomFloat(min: number, max: number): number {
   return Math.round((Math.random() * (max - min) + min) * 100) / 100;
 }
 
+function getSourceUrl(source: string, brand: string, model: string, reference: string): string {
+  const query = encodeURIComponent(`${brand} ${model} ${reference}`);
+  const searchTerm = encodeURIComponent(`${brand} ${model}`);
+  switch (source) {
+    case 'Chrono24':
+      return `https://www.chrono24.com/search/index.htm?query=${query}&dosearch=true`;
+    case 'eBay':
+      return `https://www.ebay.com/sch/i.html?_nkw=${query}&_sacat=31387`;
+    case 'WatchBox':
+      return `https://www.thewatchbox.com/search/?q=${searchTerm}`;
+    case 'Crown & Caliber':
+      return `https://www.crownandcaliber.com/search?q=${searchTerm}`;
+    case 'Hodinkee Shop':
+      return `https://shop.hodinkee.com/search?type=product&q=${searchTerm}`;
+    case "Bob's Watches":
+      return `https://www.bobswatches.com/search?q=${searchTerm}`;
+    default:
+      return `https://www.chrono24.com/search/index.htm?query=${query}&dosearch=true`;
+  }
+}
+
 export function generateListings(watch: WatchReference, count: number = 3) {
   const listings = [];
   for (let i = 0; i < count; i++) {
@@ -201,7 +222,7 @@ export function generateListings(watch: WatchReference, count: number = 3) {
       source,
       title: `${watch.brand} ${watch.model} Ref. ${watch.reference}`,
       price,
-      url: `https://${source.toLowerCase().replace(/[^a-z0-9]/g, '')}.com/listing/${watch.reference.toLowerCase()}-${randomBetween(10000, 99999)}`,
+      url: getSourceUrl(source, watch.brand, watch.model, watch.reference),
       seller: SELLERS[randomBetween(0, SELLERS.length - 1)],
       condition: CONDITIONS[randomBetween(0, CONDITIONS.length - 1)],
       listedDate: new Date(Date.now() - daysAgo * 86400000),

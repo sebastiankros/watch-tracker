@@ -2,14 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SettingsIcon } from './Icons';
+import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SearchIcon } from './Icons';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Home', Icon: DashboardIcon },
+  { href: '/search', label: 'Search', Icon: SearchIcon },
   { href: '/deals', label: 'Deals', Icon: DealsIcon },
   { href: '/market', label: 'Market', Icon: MarketIcon },
   { href: '/alerts', label: 'Alerts', Icon: AlertIcon },
-  { href: '/settings', label: 'Settings', Icon: SettingsIcon },
 ];
 
 export default function MobileNav() {

@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import { refreshMarketData } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 export async function GET() {
-  const result = refreshMarketData();
+  const result = await refreshMarketData();
   return NextResponse.json(result);
 }

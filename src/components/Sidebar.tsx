@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SettingsIcon, LogoutIcon, WatchIcon } from './Icons';
+import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SettingsIcon, LogoutIcon, WatchIcon, SearchIcon } from './Icons';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', Icon: DashboardIcon },
-  { href: '/deals', label: 'Deals', Icon: DealsIcon, badge: 'LIVE' },
+  { href: '/search', label: 'Search', Icon: SearchIcon, badge: 'LIVE' },
+  { href: '/deals', label: 'Deals', Icon: DealsIcon },
   { href: '/market', label: 'Market Prices', Icon: MarketIcon },
   { href: '/alerts', label: 'Alerts', Icon: AlertIcon },
   { href: '/settings', label: 'Settings', Icon: SettingsIcon },

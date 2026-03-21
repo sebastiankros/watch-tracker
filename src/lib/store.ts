@@ -8,6 +8,7 @@ import {
   generateSoldRecords,
   type WatchReference,
 } from './watch-data';
+import { scrapeWatchRecon, calculateMarketStats } from './scraper';
 
 export interface Watch {
   id: string;
@@ -327,26 +328,58 @@ export function searchWatches(q: string) {
     .slice(0, 20);
 }
 
-export function refreshMarketData() {
+export async function refreshMarketData() {
   initStore();
 
-  for (const watch of _watches) {
-    const variation = 1 + (Math.random() - 0.5) * 0.04;
-    const newPrice = Math.round(watch.marketPrice * variation / 100) * 100;
-    watch.previousPrice = watch.marketPrice;
-    watch.marketPrice = Math.max(newPrice, 500);
-    watch.lastUpdated = new Date().toISOString();
+  // Pick a sample of watches to scrape real data for
+  const sample = _watches.slice(0, 10);
+  let updated = 0;
 
-    _priceHistory.push({
-      id: genId(),
-      watchId: watch.id,
-      price: newPrice,
-      source: 'Market Refresh',
-      date: new Date().toISOString(),
-    });
+  for (const watch of sample) {
+    try {
+      const query = `${watch.brand} ${watch.model}`;
+      const listings = await scrapeWatchRecon(query, 14);
+      const stats = calculateMarketStats(listings, 500, 7000);
+
+      if (stats.marketPrice) {
+        watch.previousPrice = watch.marketPrice;
+        watch.marketPrice = stats.marketPrice;
+        watch.lastUpdated = new Date().toISOString();
+
+        _priceHistory.push({
+          id: genId(),
+          watchId: watch.id,
+          price: stats.marketPrice,
+          source: 'WatchRecon Scrape',
+          date: new Date().toISOString(),
+        });
+
+        // Update listings with real scraped data
+        _listings = _listings.filter((l) => l.watchId !== watch.id);
+        for (const sl of listings.filter((l) => l.price && l.price >= 500 && l.price <= 7000).slice(0, 5)) {
+          _listings.push({
+            id: genId(),
+            watchId: watch.id,
+            source: sl.source,
+            title: sl.title,
+            price: sl.price!,
+            currency: 'USD',
+            url: sl.url,
+            seller: null,
+            condition: null,
+            listedDate: new Date().toISOString(),
+            isActive: true,
+          });
+        }
+
+        updated++;
+      }
+    } catch {
+      // Skip watches that fail to scrape
+    }
   }
 
-  return { success: true, message: `Refreshed ${_watches.length} watches`, timestamp: new Date().toISOString() };
+  return { success: true, message: `Scraped real data for ${updated}/${sample.length} watches`, timestamp: new Date().toISOString() };
 }
 
 export function getAlerts() {
