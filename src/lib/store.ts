@@ -190,8 +190,8 @@ export function getWatches(opts?: {
     );
   }
 
-  // Only $1000+ min
-  filtered = filtered.filter((w) => w.marketPrice >= 1000);
+  // Enforce $500-$7000 price range
+  filtered = filtered.filter((w) => w.marketPrice >= 500 && w.marketPrice <= 7000);
   filtered.sort((a, b) => a.brand.localeCompare(b.brand) || a.model.localeCompare(b.model));
 
   const brands = [...new Set(_watches.map((w) => w.brand))].sort();
@@ -236,13 +236,13 @@ export function getDeals(opts?: {
   initStore();
 
   const minDiscount = opts?.minDiscount || 0;
-  const minPrice = opts?.minPrice || 1000;
+  const minPrice = opts?.minPrice || 500;
 
   let deals = _listings
     .filter((l) => l.isActive)
     .map((l) => {
       const watch = _watches.find((w) => w.id === l.watchId);
-      if (!watch || watch.marketPrice < 1000) return null;
+      if (!watch || watch.marketPrice < 500 || watch.marketPrice > 7000) return null;
       if (opts?.brand && watch.brand !== opts.brand) return null;
 
       const discount = ((watch.marketPrice - l.price) / watch.marketPrice) * 100;
@@ -323,7 +323,7 @@ export function searchWatches(q: string) {
         w.model.toLowerCase().includes(lower) ||
         w.reference.toLowerCase().includes(lower)
     )
-    .filter((w) => w.marketPrice >= 1000)
+    .filter((w) => w.marketPrice >= 500 && w.marketPrice <= 7000)
     .slice(0, 20);
 }
 
@@ -334,7 +334,7 @@ export function refreshMarketData() {
     const variation = 1 + (Math.random() - 0.5) * 0.04;
     const newPrice = Math.round(watch.marketPrice * variation / 100) * 100;
     watch.previousPrice = watch.marketPrice;
-    watch.marketPrice = Math.max(newPrice, 1000);
+    watch.marketPrice = Math.max(newPrice, 500);
     watch.lastUpdated = new Date().toISOString();
 
     _priceHistory.push({
