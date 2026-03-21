@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SettingsIcon, LogoutIcon, WatchIcon } from './Icons';
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Dashboard', icon: '📊' },
-  { href: '/deals', label: 'Deals', icon: '🔥' },
-  { href: '/market', label: 'Market Prices', icon: '📈' },
-  { href: '/alerts', label: 'Alerts', icon: '🔔' },
-  { href: '/settings', label: 'Settings', icon: '⚙️' },
+  { href: '/', label: 'Dashboard', Icon: DashboardIcon },
+  { href: '/deals', label: 'Deals', Icon: DealsIcon, badge: 'LIVE' },
+  { href: '/market', label: 'Market Prices', Icon: MarketIcon },
+  { href: '/alerts', label: 'Alerts', Icon: AlertIcon },
+  { href: '/settings', label: 'Settings', Icon: SettingsIcon },
 ];
 
 export default function Sidebar() {
@@ -22,18 +23,20 @@ export default function Sidebar() {
   return (
     <aside className="w-64 bg-[#111118] border-r border-gray-800 h-screen flex flex-col fixed left-0 top-0 z-20">
       <div className="p-5 border-b border-gray-800">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="text-2xl">⌚</span>
+        <Link href="/" className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-blue-600/10 border border-blue-500/20 flex items-center justify-center">
+            <WatchIcon className="w-5 h-5 text-blue-400" />
+          </div>
           <div>
-            <h1 className="text-lg font-bold text-white leading-tight">Watch Tracker</h1>
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Price Intelligence</p>
+            <h1 className="text-sm font-bold text-white leading-tight">Second Mark</h1>
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Watch Co.</p>
           </div>
         </Link>
       </div>
 
       <nav className="flex-1 p-3 space-y-1">
         {NAV_ITEMS.map((item) => {
-          const active = pathname === item.href;
+          const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
           return (
             <Link
               key={item.href}
@@ -44,11 +47,11 @@ export default function Sidebar() {
                   : 'text-gray-400 hover:text-white hover:bg-white/5'
               }`}
             >
-              <span className="text-base">{item.icon}</span>
+              <item.Icon className="w-5 h-5" />
               {item.label}
-              {item.label === 'Deals' && (
+              {item.badge && (
                 <span className="ml-auto bg-green-500/20 text-green-400 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-                  LIVE
+                  {item.badge}
                 </span>
               )}
             </Link>
@@ -61,7 +64,7 @@ export default function Sidebar() {
           onClick={handleLogout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-500 hover:text-red-400 hover:bg-red-500/5 transition"
         >
-          <span>🚪</span>
+          <LogoutIcon className="w-5 h-5" />
           Sign Out
         </button>
       </div>

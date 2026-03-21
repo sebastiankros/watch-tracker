@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SettingsIcon } from './Icons';
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Home', icon: '📊' },
-  { href: '/deals', label: 'Deals', icon: '🔥' },
-  { href: '/market', label: 'Market', icon: '📈' },
-  { href: '/alerts', label: 'Alerts', icon: '🔔' },
-  { href: '/settings', label: 'Settings', icon: '⚙️' },
+  { href: '/', label: 'Home', Icon: DashboardIcon },
+  { href: '/deals', label: 'Deals', Icon: DealsIcon },
+  { href: '/market', label: 'Market', Icon: MarketIcon },
+  { href: '/alerts', label: 'Alerts', Icon: AlertIcon },
+  { href: '/settings', label: 'Settings', Icon: SettingsIcon },
 ];
 
 export default function MobileNav() {
@@ -18,7 +19,7 @@ export default function MobileNav() {
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-[#111118] border-t border-gray-800 z-30 px-2 py-1">
       <div className="flex justify-around">
         {NAV_ITEMS.map((item) => {
-          const active = pathname === item.href;
+          const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
           return (
             <Link
               key={item.href}
@@ -27,7 +28,7 @@ export default function MobileNav() {
                 active ? 'text-blue-400' : 'text-gray-500'
               }`}
             >
-              <span className="text-lg mb-0.5">{item.icon}</span>
+              <item.Icon className="w-5 h-5 mb-0.5" />
               {item.label}
             </Link>
           );
