@@ -5,6 +5,8 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatPrice, discountColor, discountBg, timeAgo } from '@/lib/utils';
 import PriceChart from '@/components/PriceChart';
+import Breadcrumbs from '@/components/Breadcrumbs';
+import { ExternalLinkIcon, SpinnerIcon } from '@/components/Icons';
 
 interface WatchDetail {
   id: string;
@@ -58,14 +60,18 @@ export default function WatchDetailPage() {
   }, [params.id]);
 
   if (loading) {
-    return <div className="text-center text-gray-500 py-12">Loading watch details...</div>;
+    return (
+      <div className="flex items-center justify-center h-64">
+        <SpinnerIcon className="w-6 h-6 text-gray-500" />
+      </div>
+    );
   }
 
   if (!watch) {
     return (
       <div className="text-center py-12">
         <p className="text-gray-400">Watch not found</p>
-        <Link href="/market" className="text-blue-400 text-sm mt-2 inline-block">← Back to Market</Link>
+        <Link href="/market" className="text-blue-400 text-sm mt-2 inline-block">Back to Market</Link>
       </div>
     );
   }
@@ -76,7 +82,6 @@ export default function WatchDetailPage() {
     source: h.source,
   }));
 
-  // Price sources breakdown
   const sourceMap = new Map<string, number[]>();
   watch.priceHistory.forEach((h) => {
     if (!sourceMap.has(h.source)) sourceMap.set(h.source, []);
@@ -91,12 +96,10 @@ export default function WatchDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-gray-500">
-        <Link href="/market" className="hover:text-white">Market</Link>
-        <span>/</span>
-        <span className="text-white">{watch.brand} {watch.model}</span>
-      </div>
+      <Breadcrumbs items={[
+        { label: 'Market', href: '/market' },
+        { label: `${watch.brand} ${watch.model}` },
+      ]} />
 
       {/* Header */}
       <div className="bg-[#111118] border border-gray-800 rounded-xl p-6">
@@ -118,7 +121,6 @@ export default function WatchDetailPage() {
           </div>
         </div>
 
-        {/* Trend Pills */}
         <div className="flex gap-4 mt-4 flex-wrap">
           <TrendPill label="7d" current={watch.marketPrice} previous={watch.price7dAgo} />
           <TrendPill label="30d" current={watch.marketPrice} previous={watch.price30dAgo} />
@@ -157,9 +159,9 @@ export default function WatchDetailPage() {
                       )}
                     </div>
                     <div className="flex items-center justify-between mt-1 text-xs text-gray-500">
-                      <span>{listing.source} · {listing.condition || 'N/A'} · {listing.seller || 'N/A'}</span>
-                      <a href={listing.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">
-                        View ↗
+                      <span>{listing.source} &middot; {listing.condition || 'N/A'} &middot; {listing.seller || 'N/A'}</span>
+                      <a href={listing.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 inline-flex items-center gap-1">
+                        View <ExternalLinkIcon className="w-3 h-3" />
                       </a>
                     </div>
                   </div>
