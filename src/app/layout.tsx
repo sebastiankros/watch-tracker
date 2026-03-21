@@ -3,7 +3,7 @@ import './globals.css';
 import AppShell from '@/components/AppShell';
 
 export const metadata: Metadata = {
-  title: 'Watch Tracker - Market Price Intelligence',
+  title: 'Second Mark Watch Co. - Market Price Intelligence',
   description: 'Track luxury watch market prices and find undervalued deals',
 };
 
