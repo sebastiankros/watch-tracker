@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { formatPrice, discountColor, discountBg, timeAgo } from '@/lib/utils';
+import { ExternalLinkIcon, CopyIcon, SearchIcon, SpinnerIcon } from '@/components/Icons';
+import Breadcrumbs from '@/components/Breadcrumbs';
 
 interface Deal {
   id: string;
@@ -35,11 +37,10 @@ export default function DealsPage() {
   const [brands, setBrands] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filters
   const [brand, setBrand] = useState('');
   const [minDiscount, setMinDiscount] = useState('5');
-  const [minPrice, setMinPrice] = useState('1000');
-  const [maxPrice, setMaxPrice] = useState('');
+  const [minPrice, setMinPrice] = useState('500');
+  const [maxPrice, setMaxPrice] = useState('7000');
   const [sort, setSort] = useState('discount');
 
   const loadDeals = useCallback(async () => {
@@ -49,7 +50,7 @@ export default function DealsPage() {
       if (brand) params.set('brand', brand);
       params.set('minDiscount', minDiscount);
       params.set('minPrice', minPrice);
-      if (maxPrice) params.set('maxPrice', maxPrice);
+      params.set('maxPrice', maxPrice);
       params.set('sort', sort);
 
       const res = await fetch(`/api/deals?${params}`);
@@ -64,7 +65,6 @@ export default function DealsPage() {
   }, [brand, minDiscount, minPrice, maxPrice, sort]);
 
   useEffect(() => {
-    // Load brands list
     fetch('/api/watches').then(r => r.json()).then(d => setBrands(d.brands || []));
   }, []);
 
@@ -78,10 +78,11 @@ export default function DealsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      <Breadcrumbs items={[{ label: 'Deals' }]} />
+
       <div>
         <h1 className="text-2xl font-bold text-white">Deals</h1>
-        <p className="text-sm text-gray-500">Watches listed below market value</p>
+        <p className="text-sm text-gray-500">Watches listed below market value &middot; $500 &ndash; $7,000</p>
       </div>
 
       {/* Stats Bar */}
@@ -132,11 +133,11 @@ export default function DealsPage() {
               onChange={(e) => setMinPrice(e.target.value)}
               className="w-full bg-[#0a0a0f] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
             >
-              <option value="1000">$1,000+</option>
-              <option value="5000">$5,000+</option>
-              <option value="10000">$10,000+</option>
-              <option value="25000">$25,000+</option>
-              <option value="50000">$50,000+</option>
+              <option value="500">$500</option>
+              <option value="1000">$1,000</option>
+              <option value="2000">$2,000</option>
+              <option value="3000">$3,000</option>
+              <option value="5000">$5,000</option>
             </select>
           </div>
           <div>
@@ -146,12 +147,11 @@ export default function DealsPage() {
               onChange={(e) => setMaxPrice(e.target.value)}
               className="w-full bg-[#0a0a0f] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
             >
-              <option value="">No Limit</option>
+              <option value="1000">Up to $1,000</option>
+              <option value="2000">Up to $2,000</option>
+              <option value="3000">Up to $3,000</option>
               <option value="5000">Up to $5,000</option>
-              <option value="10000">Up to $10,000</option>
-              <option value="25000">Up to $25,000</option>
-              <option value="50000">Up to $50,000</option>
-              <option value="100000">Up to $100,000</option>
+              <option value="7000">Up to $7,000</option>
             </select>
           </div>
           <div>
@@ -174,10 +174,12 @@ export default function DealsPage() {
 
       {/* Deals Table */}
       {loading ? (
-        <div className="text-center text-gray-500 py-12">Loading deals...</div>
+        <div className="flex items-center justify-center py-12 gap-2 text-gray-500">
+          <SpinnerIcon className="w-5 h-5" /> Loading deals...
+        </div>
       ) : deals.length === 0 ? (
         <div className="bg-[#111118] border border-gray-800 rounded-xl p-12 text-center">
-          <div className="text-4xl mb-3">🔍</div>
+          <SearchIcon className="w-10 h-10 text-gray-600 mx-auto mb-3" />
           <p className="text-gray-400">No deals match your filters</p>
           <p className="text-sm text-gray-600 mt-1">Try lowering the minimum discount or expanding the price range</p>
         </div>
@@ -234,16 +236,16 @@ export default function DealsPage() {
                           href={deal.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-400 hover:text-blue-300 text-sm font-medium"
+                          className="text-blue-400 hover:text-blue-300 inline-flex items-center gap-1 text-sm font-medium"
                         >
-                          View ↗
+                          View <ExternalLinkIcon className="w-3 h-3" />
                         </a>
                         <button
                           onClick={() => copyUrl(deal.url)}
-                          className="text-gray-500 hover:text-white text-xs"
+                          className="text-gray-500 hover:text-white"
                           title="Copy link"
                         >
-                          📋
+                          <CopyIcon className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>
@@ -275,9 +277,9 @@ export default function DealsPage() {
                   <span className="text-green-400 font-medium">Save {formatPrice(deal.savings)}</span>
                 </div>
                 <div className="flex items-center justify-between text-xs text-gray-500">
-                  <span>{deal.source} · {deal.condition || 'N/A'} · {timeAgo(deal.listedDate)}</span>
-                  <a href={deal.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 font-medium">
-                    View ↗
+                  <span>{deal.source} &middot; {deal.condition || 'N/A'} &middot; {timeAgo(deal.listedDate)}</span>
+                  <a href={deal.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 font-medium inline-flex items-center gap-1">
+                    View <ExternalLinkIcon className="w-3 h-3" />
                   </a>
                 </div>
               </div>
@@ -287,7 +289,7 @@ export default function DealsPage() {
       )}
 
       <div className="text-center text-xs text-gray-600">
-        Showing {deals.length} deals · Prices updated periodically from multiple sources
+        Showing {deals.length} deals &middot; Prices updated periodically from multiple sources
       </div>
     </div>
   );

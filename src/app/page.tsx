@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { formatPrice, discountColor, timeAgo } from '@/lib/utils';
+import { WatchIcon, DealsIcon, MarketIcon, AlertIcon, RefreshIcon, SpinnerIcon, ExternalLinkIcon, TrendUpIcon, TrendDownIcon, ArrowRightIcon } from '@/components/Icons';
 
 interface DealSummary {
   id: string;
@@ -39,7 +40,6 @@ export default function DashboardPage() {
       const watchesData = await watchesRes.json();
       const dealsData = await dealsRes.json();
 
-      // Calculate market trend
       const watches = watchesData.watches || [];
       let upCount = 0, downCount = 0;
       for (const w of watches) {
@@ -82,7 +82,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading dashboard...</div>
+        <SpinnerIcon className="w-6 h-6 text-gray-500" />
       </div>
     );
   }
@@ -106,48 +106,62 @@ export default function DashboardPage() {
         >
           {refreshing ? (
             <>
-              <span className="animate-spin">↻</span> Refreshing...
+              <SpinnerIcon className="w-4 h-4" /> Refreshing...
             </>
           ) : (
-            <>↻ Refresh Data</>
+            <>
+              <RefreshIcon className="w-4 h-4" /> Refresh Data
+            </>
           )}
         </button>
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats Cards — Clickable */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          label="Watches Tracked"
-          value={data.totalWatches.toString()}
-          sub="active models"
-          color="blue"
-        />
-        <StatCard
-          label="Deals Found"
-          value={data.totalDeals.toString()}
-          sub="below market value"
-          color="green"
-        />
-        <StatCard
-          label="Avg. Discount"
-          value={`${data.avgDiscount}%`}
-          sub="on current deals"
-          color="yellow"
-        />
-        <StatCard
-          label="Market Trend"
-          value={data.marketTrend === 'up' ? '↑ Rising' : data.marketTrend === 'down' ? '↓ Falling' : '→ Flat'}
-          sub="7-day movement"
-          color={data.marketTrend === 'up' ? 'green' : data.marketTrend === 'down' ? 'red' : 'gray'}
-        />
+        <Link href="/market">
+          <StatCard
+            label="Watches Tracked"
+            value={data.totalWatches.toString()}
+            sub="active models"
+            color="blue"
+            Icon={WatchIcon}
+          />
+        </Link>
+        <Link href="/deals">
+          <StatCard
+            label="Deals Found"
+            value={data.totalDeals.toString()}
+            sub="below market value"
+            color="green"
+            Icon={DealsIcon}
+          />
+        </Link>
+        <Link href="/deals?minDiscount=10">
+          <StatCard
+            label="Avg. Discount"
+            value={`${data.avgDiscount}%`}
+            sub="on current deals"
+            color="yellow"
+            Icon={TagIcon}
+          />
+        </Link>
+        <Link href="/market">
+          <StatCard
+            label="Market Trend"
+            value={data.marketTrend === 'up' ? 'Rising' : data.marketTrend === 'down' ? 'Falling' : 'Flat'}
+            sub="7-day movement"
+            color={data.marketTrend === 'up' ? 'green' : data.marketTrend === 'down' ? 'red' : 'gray'}
+            Icon={data.marketTrend === 'down' ? TrendDownIcon : TrendUpIcon}
+          />
+        </Link>
       </div>
 
       {/* Top Deals */}
       <div className="bg-[#111118] border border-gray-800 rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
           <h2 className="text-lg font-semibold text-white">Top 5 Deals</h2>
-          <Link href="/deals" className="text-sm text-blue-400 hover:text-blue-300">
-            View all →
+          <Link href="/deals" className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
+            View all <ArrowRightIcon className="w-3 h-3" />
           </Link>
         </div>
         {data.topDeals.length === 0 ? (
@@ -162,7 +176,7 @@ export default function DashboardPage() {
                     {deal.brand} {deal.model}
                   </Link>
                   <div className="text-xs text-gray-500 mt-0.5">
-                    {deal.source} · Listed at {formatPrice(deal.listingPrice)}
+                    {deal.source} &middot; Listed at {formatPrice(deal.listingPrice)}
                   </div>
                 </div>
                 <div className="text-right">
@@ -177,9 +191,9 @@ export default function DashboardPage() {
                   href={deal.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-gray-500 hover:text-blue-400 text-sm"
+                  className="text-gray-500 hover:text-blue-400"
                 >
-                  ↗
+                  <ExternalLinkIcon className="w-4 h-4" />
                 </a>
               </div>
             ))}
@@ -187,20 +201,20 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Quick Links */}
+      {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Link href="/deals" className="bg-[#111118] border border-gray-800 rounded-xl p-5 hover:border-green-500/30 transition group">
-          <div className="text-2xl mb-2">🔥</div>
+          <DealsIcon className="w-8 h-8 text-green-400 mb-3" />
           <h3 className="text-white font-semibold group-hover:text-green-400 transition">Find Deals</h3>
           <p className="text-sm text-gray-500 mt-1">Browse undervalued watches for sale</p>
         </Link>
         <Link href="/market" className="bg-[#111118] border border-gray-800 rounded-xl p-5 hover:border-blue-500/30 transition group">
-          <div className="text-2xl mb-2">📈</div>
+          <MarketIcon className="w-8 h-8 text-blue-400 mb-3" />
           <h3 className="text-white font-semibold group-hover:text-blue-400 transition">Market Prices</h3>
           <p className="text-sm text-gray-500 mt-1">Track live market values and trends</p>
         </Link>
         <Link href="/alerts" className="bg-[#111118] border border-gray-800 rounded-xl p-5 hover:border-yellow-500/30 transition group">
-          <div className="text-2xl mb-2">🔔</div>
+          <AlertIcon className="w-8 h-8 text-yellow-400 mb-3" />
           <h3 className="text-white font-semibold group-hover:text-yellow-400 transition">Set Alerts</h3>
           <p className="text-sm text-gray-500 mt-1">Get notified when prices drop</p>
         </Link>
@@ -209,23 +223,34 @@ export default function DashboardPage() {
   );
 }
 
+function TagIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
+    </svg>
+  );
+}
+
 function StatCard({
   label,
   value,
   sub,
   color,
+  Icon,
 }: {
   label: string;
   value: string;
   sub: string;
   color: string;
+  Icon: React.ComponentType<{ className?: string }>;
 }) {
   const colorMap: Record<string, string> = {
-    blue: 'border-blue-500/20 bg-blue-500/5',
-    green: 'border-green-500/20 bg-green-500/5',
-    yellow: 'border-yellow-500/20 bg-yellow-500/5',
-    red: 'border-red-500/20 bg-red-500/5',
-    gray: 'border-gray-500/20 bg-gray-500/5',
+    blue: 'border-blue-500/20 bg-blue-500/5 hover:border-blue-500/40',
+    green: 'border-green-500/20 bg-green-500/5 hover:border-green-500/40',
+    yellow: 'border-yellow-500/20 bg-yellow-500/5 hover:border-yellow-500/40',
+    red: 'border-red-500/20 bg-red-500/5 hover:border-red-500/40',
+    gray: 'border-gray-500/20 bg-gray-500/5 hover:border-gray-500/40',
   };
 
   const textColor: Record<string, string> = {
@@ -236,9 +261,20 @@ function StatCard({
     gray: 'text-gray-400',
   };
 
+  const iconColor: Record<string, string> = {
+    blue: 'text-blue-400/50',
+    green: 'text-green-400/50',
+    yellow: 'text-yellow-400/50',
+    red: 'text-red-400/50',
+    gray: 'text-gray-400/50',
+  };
+
   return (
-    <div className={`border rounded-xl p-4 ${colorMap[color] || colorMap.gray}`}>
-      <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
+    <div className={`border rounded-xl p-4 transition cursor-pointer ${colorMap[color] || colorMap.gray}`}>
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
+        <Icon className={`w-4 h-4 ${iconColor[color] || iconColor.gray}`} />
+      </div>
       <p className={`text-2xl font-bold mt-1 ${textColor[color] || textColor.gray}`}>{value}</p>
       <p className="text-xs text-gray-600 mt-1">{sub}</p>
     </div>
