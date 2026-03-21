@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Watch {
+  id            String   @id @default(cuid())
+  brand         String
+  model         String
+  reference     String   @unique
+  imageUrl      String?
+  marketPrice   Float
+  previousPrice Float?
+  price7dAgo    Float?
+  price30dAgo   Float?
+  price90dAgo   Float?
+  confidence    Float    @default(0.5)
+  lastUpdated   DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  priceHistory PriceHistory[]
+  listings     Listing[]
+  alerts       Alert[]
+}
+
+model PriceHistory {
+  id        String   @id @default(cuid())
+  watchId   String
+  price     Float
+  source    String
+  date      DateTime @default(now())
+  watch     Watch    @relation(fields: [watchId], references: [id], onDelete: Cascade)
+
+  @@index([watchId, date])
+}
+
+model Listing {
+  id           String   @id @default(cuid())
+  watchId      String
+  source       String
+  title        String
+  price        Float
+  currency     String   @default("USD")
+  url          String
+  seller       String?
+  condition    String?
+  listedDate   DateTime @default(now())
+  isActive     Boolean  @default(true)
+  lastSeen     DateTime @default(now())
+  watch        Watch    @relation(fields: [watchId], references: [id], onDelete: Cascade)
+
+  @@index([watchId])
+  @@index([isActive])
+}
+
+model Alert {
+  id             String   @id @default(cuid())
+  watchId        String?
+  brand          String?
+  modelName      String?
+  targetPrice    Float?
+  discountPct    Float?
+  isActive       Boolean  @default(true)
+  lastTriggered  DateTime?
+  createdAt      DateTime @default(now())
+  watch          Watch?   @relation(fields: [watchId], references: [id], onDelete: Cascade)
+}
+
+model Settings {
+  id               String @id @default("default")
+  refreshInterval  Int    @default(60)
+  minDiscountPct   Float  @default(5)
+  preferredBrands  String @default("")
+  alertEmail       String @default("")
+}
+
+model SoldRecord {
+  id        String   @id @default(cuid())
+  reference String
+  price     Float
+  source    String
+  soldDate  DateTime
+  condition String?
+  createdAt DateTime @default(now())
+
+  @@index([reference])
+}
