@@ -6,28 +6,28 @@ const JWT_SECRET = new TextEncoder().encode(
 );
 
 const USERS = [
-  { username: 'seb', password: 'seb123', name: 'Sebastian' },
-  { username: 'partner', password: 'partner123', name: 'Partner' },
+  { email: 'secondmarkwatchco@gmail.com', password: 'seb123', name: 'Sebastian' },
+  { email: 'partner@secondmarkwatch.co', password: 'partner123', name: 'Partner' },
 ];
 
-export async function authenticate(username: string, password: string) {
+export async function authenticate(email: string, password: string) {
   const user = USERS.find(
-    (u) => u.username === username && u.password === password
+    (u) => u.email === email && u.password === password
   );
   if (!user) return null;
 
-  const token = await new SignJWT({ username: user.username, name: user.name })
+  const token = await new SignJWT({ email: user.email, name: user.name })
     .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime('7d')
     .sign(JWT_SECRET);
 
-  return { token, user: { username: user.username, name: user.name } };
+  return { token, user: { email: user.email, name: user.name } };
 }
 
 export async function verifyToken(token: string) {
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET);
-    return payload as { username: string; name: string };
+    return payload as { email: string; name: string };
   } catch {
     return null;
   }
