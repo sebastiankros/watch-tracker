@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { scrapeWatchRecon, calculateMarketStats } from '@/lib/scraper';
+import { scrapeEbay, calculateMarketStats } from '@/lib/scraper';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const listings = await scrapeWatchRecon(q, 30);
+    const listings = await scrapeEbay(q);
     const filtered = listings.filter((l) => l.price && l.price >= 500 && l.price <= 7000);
     const stats = calculateMarketStats(filtered, 500, 7000);
 

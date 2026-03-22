@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getWatches } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -10,6 +11,6 @@ export async function GET(request: Request) {
   const maxPrice = searchParams.get('maxPrice') ? Number(searchParams.get('maxPrice')) : undefined;
   const search = searchParams.get('search') || undefined;
 
-  const data = getWatches({ brand, search, minPrice, maxPrice });
+  const data = await getWatches({ brand, search, minPrice, maxPrice });
   return NextResponse.json(data);
 }

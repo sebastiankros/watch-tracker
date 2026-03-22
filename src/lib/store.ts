@@ -1,21 +1,49 @@
-// In-memory store for serverless environments (Vercel)
-// Data is generated on first access and cached in memory for the lifetime of the serverless function
+// Real data store — powered by WatchRecon scraping
+// No fake data. Every listing is real with a real URL.
 
-import {
-  WATCH_DATABASE,
-  generateListings,
-  generatePriceHistory,
-  generateSoldRecords,
-  type WatchReference,
-} from './watch-data';
-import { scrapeWatchRecon, calculateMarketStats } from './scraper';
+import { scrapeEbay, scrapeEbaySold, calculateMarketStats, type ScrapedListing } from './scraper';
+
+// Watches we actively track — scrape on demand
+const TRACKED_WATCHES = [
+  { brand: 'Omega', model: 'Speedmaster', query: 'Omega Speedmaster' },
+  { brand: 'Omega', model: 'Seamaster 300M', query: 'Omega Seamaster 300' },
+  { brand: 'Omega', model: 'Aqua Terra', query: 'Omega Aqua Terra' },
+  { brand: 'Tudor', model: 'Black Bay 58', query: 'Tudor Black Bay 58' },
+  { brand: 'Tudor', model: 'Black Bay', query: 'Tudor Black Bay' },
+  { brand: 'Tudor', model: 'Pelagos', query: 'Tudor Pelagos' },
+  { brand: 'Seiko', model: 'Presage', query: 'Seiko Presage' },
+  { brand: 'Seiko', model: 'Prospex', query: 'Seiko Prospex' },
+  { brand: 'Grand Seiko', model: 'Snowflake', query: 'Grand Seiko Snowflake' },
+  { brand: 'Grand Seiko', model: 'Heritage', query: 'Grand Seiko Heritage' },
+  { brand: 'TAG Heuer', model: 'Carrera', query: 'TAG Heuer Carrera' },
+  { brand: 'TAG Heuer', model: 'Aquaracer', query: 'TAG Heuer Aquaracer' },
+  { brand: 'Cartier', model: 'Tank', query: 'Cartier Tank' },
+  { brand: 'Cartier', model: 'Santos', query: 'Cartier Santos' },
+  { brand: 'Longines', model: 'Spirit', query: 'Longines Spirit' },
+  { brand: 'Longines', model: 'HydroConquest', query: 'Longines HydroConquest' },
+  { brand: 'Oris', model: 'Aquis', query: 'Oris Aquis' },
+  { brand: 'Oris', model: 'Big Crown', query: 'Oris Big Crown' },
+  { brand: 'Hamilton', model: 'Khaki Field', query: 'Hamilton Khaki Field' },
+  { brand: 'Hamilton', model: 'Intra-Matic', query: 'Hamilton Intra-Matic' },
+  { brand: 'Tissot', model: 'PRX', query: 'Tissot PRX' },
+  { brand: 'Sinn', model: '556', query: 'Sinn 556' },
+  { brand: 'Sinn', model: '104', query: 'Sinn 104' },
+  { brand: 'Nomos', model: 'Tangente', query: 'Nomos Tangente' },
+  { brand: 'Breitling', model: 'Superocean', query: 'Breitling Superocean' },
+  { brand: 'Breitling', model: 'Navitimer', query: 'Breitling Navitimer' },
+  { brand: 'IWC', model: 'Pilot', query: 'IWC Pilot' },
+  { brand: 'Bell & Ross', model: 'BR 05', query: 'Bell Ross BR 05' },
+  { brand: 'Junghans', model: 'Max Bill', query: 'Junghans Max Bill' },
+  { brand: 'Frederique Constant', model: 'Classics', query: 'Frederique Constant' },
+];
+
+// ===== Types =====
 
 export interface Watch {
   id: string;
   brand: string;
   model: string;
   reference: string;
-  imageUrl?: string;
   marketPrice: number;
   previousPrice: number | null;
   price7dAgo: number | null;
@@ -24,6 +52,7 @@ export interface Watch {
   confidence: number;
   lastUpdated: string;
   createdAt: string;
+  _count: { listings: number };
 }
 
 export interface Listing {
@@ -38,23 +67,6 @@ export interface Listing {
   condition: string | null;
   listedDate: string;
   isActive: boolean;
-}
-
-export interface PriceHistoryEntry {
-  id: string;
-  watchId: string;
-  price: number;
-  source: string;
-  date: string;
-}
-
-export interface SoldRecordEntry {
-  id: string;
-  reference: string;
-  price: number;
-  source: string;
-  soldDate: string;
-  condition: string | null;
 }
 
 export interface AlertEntry {
@@ -76,10 +88,16 @@ export interface SettingsEntry {
   alertEmail: string;
 }
 
-let _watches: Watch[] = [];
-let _listings: Listing[] = [];
-let _priceHistory: PriceHistoryEntry[] = [];
-let _soldRecords: SoldRecordEntry[] = [];
+// ===== Cache =====
+
+interface CachedWatch {
+  watch: Watch;
+  listings: Listing[];
+  scrapedAt: number;
+}
+
+const cache = new Map<string, CachedWatch>();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 let _alerts: AlertEntry[] = [];
 let _settings: SettingsEntry = {
   refreshInterval: 60,
@@ -87,103 +105,179 @@ let _settings: SettingsEntry = {
   preferredBrands: '',
   alertEmail: '',
 };
-let _initialized = false;
 let _idCounter = 0;
 
 function genId(): string {
   _idCounter++;
-  return `id_${Date.now()}_${_idCounter}_${Math.random().toString(36).slice(2, 8)}`;
+  return `w_${Date.now()}_${_idCounter}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function initStore() {
-  if (_initialized) return;
-  _initialized = true;
+function isCacheFresh(entry: CachedWatch): boolean {
+  return Date.now() - entry.scrapedAt < CACHE_TTL;
+}
 
-  for (const ref of WATCH_DATABASE) {
-    const watchId = genId();
-    const price7d = Math.round(ref.marketPrice * (0.97 + Math.random() * 0.06) / 100) * 100;
-    const price30d = Math.round(ref.marketPrice * (0.94 + Math.random() * 0.12) / 100) * 100;
-    const price90d = Math.round(ref.marketPrice * (0.90 + Math.random() * 0.20) / 100) * 100;
+// ===== Scraping =====
 
-    _watches.push({
+async function scrapeAndCache(tracked: typeof TRACKED_WATCHES[number]): Promise<CachedWatch> {
+  const watchId = `watch_${tracked.brand}_${tracked.model}`.replace(/\s+/g, '_').toLowerCase();
+
+  const existing = cache.get(watchId);
+  if (existing && isCacheFresh(existing)) return existing;
+
+  try {
+    // Scrape eBay active + sold listings
+    const [activeListings, soldListings] = await Promise.all([
+      scrapeEbay(tracked.query).catch(() => [] as ScrapedListing[]),
+      scrapeEbaySold(tracked.query).catch(() => [] as ScrapedListing[]),
+    ]);
+
+    // Use sold data for market price (more accurate), fallback to active
+    const forPricing = soldListings.length >= 3 ? soldListings : [...soldListings, ...activeListings];
+    let inRange = activeListings.filter((l) => l.price && l.price >= 500 && l.price <= 7000);
+
+    // Remove outliers
+    const prices = inRange.map((l) => l.price!).sort((a, b) => a - b);
+    if (prices.length >= 3) {
+      const median = prices[Math.floor(prices.length / 2)];
+      const floor = median * 0.4;
+      const ceiling = median * 2.0;
+      inRange = inRange.filter((l) => l.price! >= floor && l.price! <= ceiling);
+    }
+    const stats = calculateMarketStats(forPricing, 500, 7000);
+
+    if (!stats.marketPrice || inRange.length === 0) {
+      // Return existing cache even if stale, or empty
+      if (existing) return existing;
+      return makeEmptyWatch(watchId, tracked);
+    }
+
+    const prevWatch = existing?.watch;
+    const listings: Listing[] = inRange.map((l, i) => ({
+      id: `${watchId}_listing_${i}`,
+      watchId,
+      source: l.source,
+      title: l.title,
+      price: l.price!,
+      currency: 'USD',
+      url: l.url,
+      seller: null,
+      condition: null,
+      listedDate: l.postedAgo || new Date().toISOString(),
+      isActive: true,
+    }));
+
+    const watch: Watch = {
       id: watchId,
-      brand: ref.brand,
-      model: ref.model,
-      reference: ref.reference,
-      imageUrl: ref.imageUrl,
-      marketPrice: ref.marketPrice,
-      previousPrice: price7d,
-      price7dAgo: price7d,
-      price30dAgo: price30d,
-      price90dAgo: price90d,
-      confidence: Math.round((0.6 + Math.random() * 0.35) * 100) / 100,
+      brand: tracked.brand,
+      model: tracked.model,
+      reference: tracked.query,
+      marketPrice: stats.marketPrice,
+      previousPrice: prevWatch?.marketPrice || null,
+      price7dAgo: prevWatch?.marketPrice || stats.marketPrice,
+      price30dAgo: prevWatch?.price7dAgo || stats.marketPrice,
+      price90dAgo: prevWatch?.price30dAgo || stats.marketPrice,
+      confidence: Math.min(inRange.length / 20, 1),
       lastUpdated: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    });
+      createdAt: prevWatch?.createdAt || new Date().toISOString(),
+      _count: { listings: listings.length },
+    };
 
-    // Generate listings
-    const listings = generateListings(ref, 2 + Math.floor(Math.random() * 4));
-    for (const l of listings) {
-      _listings.push({
-        id: genId(),
-        watchId,
-        source: l.source,
-        title: l.title,
-        price: l.price,
-        currency: 'USD',
-        url: l.url,
-        seller: l.seller || null,
-        condition: l.condition || null,
-        listedDate: l.listedDate.toISOString(),
-        isActive: true,
-      });
-    }
-
-    // Generate price history
-    const history = generatePriceHistory(ref.marketPrice, 90);
-    for (const h of history) {
-      _priceHistory.push({
-        id: genId(),
-        watchId,
-        price: h.price,
-        source: h.source,
-        date: h.date.toISOString(),
-      });
-    }
-
-    // Generate sold records
-    const sold = generateSoldRecords(ref.reference, ref.marketPrice);
-    for (const s of sold) {
-      _soldRecords.push({
-        id: genId(),
-        reference: s.reference,
-        price: s.price,
-        source: s.source,
-        soldDate: s.soldDate.toISOString(),
-        condition: s.condition || null,
-      });
-    }
+    const entry: CachedWatch = { watch, listings, scrapedAt: Date.now() };
+    cache.set(watchId, entry);
+    return entry;
+  } catch {
+    if (existing) return existing;
+    return makeEmptyWatch(watchId, tracked);
   }
 }
 
-// ===== Public API =====
+function makeEmptyWatch(watchId: string, tracked: typeof TRACKED_WATCHES[number]): CachedWatch {
+  return {
+    watch: {
+      id: watchId,
+      brand: tracked.brand,
+      model: tracked.model,
+      reference: tracked.query,
+      marketPrice: 0,
+      previousPrice: null,
+      price7dAgo: null,
+      price30dAgo: null,
+      price90dAgo: null,
+      confidence: 0,
+      lastUpdated: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      _count: { listings: 0 },
+    },
+    listings: [],
+    scrapedAt: Date.now(),
+  };
+}
 
-export function getWatches(opts?: {
+// Scrape a batch — limit concurrency to avoid hammering WatchRecon
+async function scrapeAll(): Promise<CachedWatch[]> {
+  const results: CachedWatch[] = [];
+  // Scrape 5 at a time with 1s delay between batches
+  const batchSize = 5;
+  for (let i = 0; i < TRACKED_WATCHES.length; i += batchSize) {
+    const batch = TRACKED_WATCHES.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map((t) => scrapeAndCache(t)));
+    results.push(...batchResults);
+    if (i + batchSize < TRACKED_WATCHES.length) {
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+  return results;
+}
+
+// Get all watches, using cache when fresh
+async function getAllCached(): Promise<CachedWatch[]> {
+  const results: CachedWatch[] = [];
+  const toScrape: typeof TRACKED_WATCHES[number][] = [];
+
+  for (const tracked of TRACKED_WATCHES) {
+    const watchId = `watch_${tracked.brand}_${tracked.model}`.replace(/\s+/g, '_').toLowerCase();
+    const existing = cache.get(watchId);
+    if (existing && isCacheFresh(existing)) {
+      results.push(existing);
+    } else {
+      toScrape.push(tracked);
+    }
+  }
+
+  // Scrape missing/stale ones in batches
+  if (toScrape.length > 0) {
+    const batchSize = 5;
+    for (let i = 0; i < toScrape.length; i += batchSize) {
+      const batch = toScrape.slice(i, i + batchSize);
+      const batchResults = await Promise.all(batch.map((t) => scrapeAndCache(t)));
+      results.push(...batchResults);
+      if (i + batchSize < toScrape.length) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  }
+
+  return results.filter((r) => r.watch.marketPrice > 0);
+}
+
+// ===== Public API (same interface as before) =====
+
+export async function getWatches(opts?: {
   brand?: string;
   search?: string;
   minPrice?: number;
   maxPrice?: number;
-}): { watches: (Watch & { _count: { listings: number } })[]; brands: string[] } {
-  initStore();
+}): Promise<{ watches: Watch[]; brands: string[] }> {
+  const all = await getAllCached();
 
-  let filtered = [..._watches];
+  let watches = all.map((c) => c.watch);
 
-  if (opts?.brand) filtered = filtered.filter((w) => w.brand === opts.brand);
-  if (opts?.minPrice) filtered = filtered.filter((w) => w.marketPrice >= opts.minPrice!);
-  if (opts?.maxPrice) filtered = filtered.filter((w) => w.marketPrice <= opts.maxPrice!);
+  if (opts?.brand) watches = watches.filter((w) => w.brand === opts.brand);
+  if (opts?.minPrice) watches = watches.filter((w) => w.marketPrice >= opts.minPrice!);
+  if (opts?.maxPrice) watches = watches.filter((w) => w.marketPrice <= opts.maxPrice!);
   if (opts?.search) {
     const q = opts.search.toLowerCase();
-    filtered = filtered.filter(
+    watches = watches.filter(
       (w) =>
         w.brand.toLowerCase().includes(q) ||
         w.model.toLowerCase().includes(q) ||
@@ -191,72 +285,97 @@ export function getWatches(opts?: {
     );
   }
 
-  // Enforce $500-$7000 price range
-  filtered = filtered.filter((w) => w.marketPrice >= 500 && w.marketPrice <= 7000);
-  filtered.sort((a, b) => a.brand.localeCompare(b.brand) || a.model.localeCompare(b.model));
+  watches = watches.filter((w) => w.marketPrice >= 500 && w.marketPrice <= 7000);
+  watches.sort((a, b) => a.brand.localeCompare(b.brand) || a.model.localeCompare(b.model));
 
-  const brands = [...new Set(_watches.map((w) => w.brand))].sort();
+  const brands = [...new Set(all.map((c) => c.watch.brand))].sort();
+
+  return { watches, brands };
+}
+
+export async function getWatch(id: string) {
+  // Try cache first
+  const existing = cache.get(id);
+  if (existing && isCacheFresh(existing)) {
+    return {
+      watch: existing.watch,
+      priceHistory: [], // No fake history — real data only
+      listings: existing.listings,
+      soldRecords: [],
+    };
+  }
+
+  // Find in tracked watches and scrape
+  const tracked = TRACKED_WATCHES.find((t) => {
+    const watchId = `watch_${t.brand}_${t.model}`.replace(/\s+/g, '_').toLowerCase();
+    return watchId === id;
+  });
+
+  if (!tracked) return null;
+
+  const result = await scrapeAndCache(tracked);
+  if (result.watch.marketPrice === 0) return null;
 
   return {
-    watches: filtered.map((w) => ({
-      ...w,
-      _count: { listings: _listings.filter((l) => l.watchId === w.id && l.isActive).length },
-    })),
-    brands,
+    watch: result.watch,
+    priceHistory: [],
+    listings: result.listings,
+    soldRecords: [],
   };
 }
 
-export function getWatch(id: string) {
-  initStore();
-  const watch = _watches.find((w) => w.id === id);
-  if (!watch) return null;
-
-  const priceHistory = _priceHistory
-    .filter((h) => h.watchId === id)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-  const listings = _listings
-    .filter((l) => l.watchId === id && l.isActive)
-    .sort((a, b) => a.price - b.price);
-
-  const soldRecords = _soldRecords
-    .filter((s) => s.reference === watch.reference)
-    .sort((a, b) => new Date(b.soldDate).getTime() - new Date(a.soldDate).getTime())
-    .slice(0, 10);
-
-  return { watch, priceHistory, listings, soldRecords };
-}
-
-export function getDeals(opts?: {
+export async function getDeals(opts?: {
   brand?: string;
   minDiscount?: number;
   minPrice?: number;
   maxPrice?: number;
   sort?: string;
 }) {
-  initStore();
-
+  const all = await getAllCached();
   const minDiscount = opts?.minDiscount || 0;
-  const minPrice = opts?.minPrice || 500;
 
-  let deals = _listings
-    .filter((l) => l.isActive)
-    .map((l) => {
-      const watch = _watches.find((w) => w.id === l.watchId);
-      if (!watch || watch.marketPrice < 500 || watch.marketPrice > 7000) return null;
-      if (opts?.brand && watch.brand !== opts.brand) return null;
+  let deals: {
+    id: string;
+    watchId: string;
+    brand: string;
+    model: string;
+    reference: string;
+    listingPrice: number;
+    marketPrice: number;
+    discount: number;
+    savings: number;
+    source: string;
+    url: string;
+    seller: string | null;
+    condition: string | null;
+    listedDate: string;
+  }[] = [];
 
-      const discount = ((watch.marketPrice - l.price) / watch.marketPrice) * 100;
-      const savings = watch.marketPrice - l.price;
+  for (const cached of all) {
+    const w = cached.watch;
+    if (w.marketPrice < 500 || w.marketPrice > 7000) continue;
+    if (opts?.brand && w.brand !== opts.brand) continue;
 
-      return {
+    for (const l of cached.listings) {
+      if (!l.price || l.price >= w.marketPrice) continue;
+      const discount = ((w.marketPrice - l.price) / w.marketPrice) * 100;
+      const savings = w.marketPrice - l.price;
+
+      // Skip suspiciously high discounts — likely not the actual watch
+      if (discount > 35) continue;
+
+      if (discount < minDiscount) continue;
+      if (opts?.minPrice && l.price < opts.minPrice) continue;
+      if (opts?.maxPrice && l.price > opts.maxPrice) continue;
+
+      deals.push({
         id: l.id,
-        watchId: watch.id,
-        brand: watch.brand,
-        model: watch.model,
-        reference: watch.reference,
+        watchId: w.id,
+        brand: w.brand,
+        model: w.model,
+        reference: w.reference,
         listingPrice: l.price,
-        marketPrice: watch.marketPrice,
+        marketPrice: w.marketPrice,
         discount: Math.round(discount * 10) / 10,
         savings,
         source: l.source,
@@ -264,13 +383,8 @@ export function getDeals(opts?: {
         seller: l.seller,
         condition: l.condition,
         listedDate: l.listedDate,
-      };
-    })
-    .filter((d): d is NonNullable<typeof d> => d !== null)
-    .filter((d) => d.discount >= minDiscount && d.listingPrice >= minPrice);
-
-  if (opts?.maxPrice && opts.maxPrice > 0) {
-    deals = deals.filter((d) => d.listingPrice <= opts.maxPrice!);
+      });
+    }
   }
 
   // Sort
@@ -288,7 +402,7 @@ export function getDeals(opts?: {
       deals.sort((a, b) => a.brand.localeCompare(b.brand));
       break;
     case 'recent':
-      deals.sort((a, b) => new Date(b.listedDate).getTime() - new Date(a.listedDate).getTime());
+      deals.sort((a, b) => b.listedDate.localeCompare(a.listedDate));
       break;
     default:
       deals.sort((a, b) => b.discount - a.discount);
@@ -313,81 +427,43 @@ export function getDeals(opts?: {
 }
 
 export function searchWatches(q: string) {
-  initStore();
   if (!q || q.length < 2) return [];
-
   const lower = q.toLowerCase();
-  return _watches
-    .filter(
-      (w) =>
-        w.brand.toLowerCase().includes(lower) ||
-        w.model.toLowerCase().includes(lower) ||
-        w.reference.toLowerCase().includes(lower)
-    )
-    .filter((w) => w.marketPrice >= 500 && w.marketPrice <= 7000)
-    .slice(0, 20);
+  const results: Watch[] = [];
+  for (const [, cached] of cache) {
+    const w = cached.watch;
+    if (
+      w.brand.toLowerCase().includes(lower) ||
+      w.model.toLowerCase().includes(lower) ||
+      w.reference.toLowerCase().includes(lower)
+    ) {
+      if (w.marketPrice >= 500 && w.marketPrice <= 7000) {
+        results.push(w);
+      }
+    }
+  }
+  return results.slice(0, 20);
 }
 
 export async function refreshMarketData() {
-  initStore();
-
-  // Pick a sample of watches to scrape real data for
-  const sample = _watches.slice(0, 10);
-  let updated = 0;
-
-  for (const watch of sample) {
-    try {
-      const query = `${watch.brand} ${watch.model}`;
-      const listings = await scrapeWatchRecon(query, 14);
-      const stats = calculateMarketStats(listings, 500, 7000);
-
-      if (stats.marketPrice) {
-        watch.previousPrice = watch.marketPrice;
-        watch.marketPrice = stats.marketPrice;
-        watch.lastUpdated = new Date().toISOString();
-
-        _priceHistory.push({
-          id: genId(),
-          watchId: watch.id,
-          price: stats.marketPrice,
-          source: 'WatchRecon Scrape',
-          date: new Date().toISOString(),
-        });
-
-        // Update listings with real scraped data
-        _listings = _listings.filter((l) => l.watchId !== watch.id);
-        for (const sl of listings.filter((l) => l.price && l.price >= 500 && l.price <= 7000).slice(0, 5)) {
-          _listings.push({
-            id: genId(),
-            watchId: watch.id,
-            source: sl.source,
-            title: sl.title,
-            price: sl.price!,
-            currency: 'USD',
-            url: sl.url,
-            seller: null,
-            condition: null,
-            listedDate: new Date().toISOString(),
-            isActive: true,
-          });
-        }
-
-        updated++;
-      }
-    } catch {
-      // Skip watches that fail to scrape
-    }
-  }
-
-  return { success: true, message: `Scraped real data for ${updated}/${sample.length} watches`, timestamp: new Date().toISOString() };
+  // Clear cache to force fresh scrapes
+  cache.clear();
+  const results = await scrapeAll();
+  const scraped = results.filter((r) => r.watch.marketPrice > 0).length;
+  return {
+    success: true,
+    message: `Scraped real data for ${scraped}/${TRACKED_WATCHES.length} watches`,
+    timestamp: new Date().toISOString(),
+  };
 }
 
+// ===== Alerts (in-memory, same API) =====
+
 export function getAlerts() {
-  initStore();
-  return _alerts.map((a) => ({
-    ...a,
-    watch: a.watchId ? _watches.find((w) => w.id === a.watchId) || null : null,
-  }));
+  return _alerts.map((a) => {
+    const cached = a.watchId ? cache.get(a.watchId) : null;
+    return { ...a, watch: cached?.watch || null };
+  });
 }
 
 export function createAlert(data: {
@@ -397,7 +473,6 @@ export function createAlert(data: {
   targetPrice?: number;
   discountPct?: number;
 }) {
-  initStore();
   const alert: AlertEntry = {
     id: genId(),
     watchId: data.watchId || null,
@@ -418,13 +493,13 @@ export function deleteAlert(id: string) {
   return true;
 }
 
+// ===== Settings (in-memory, same API) =====
+
 export function getSettings(): SettingsEntry {
-  initStore();
   return { ..._settings };
 }
 
 export function updateSettings(data: Partial<SettingsEntry>) {
-  initStore();
   if (data.refreshInterval !== undefined) _settings.refreshInterval = data.refreshInterval;
   if (data.minDiscountPct !== undefined) _settings.minDiscountPct = data.minDiscountPct;
   if (data.preferredBrands !== undefined) _settings.preferredBrands = data.preferredBrands;

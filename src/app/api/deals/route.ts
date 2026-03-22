@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDeals } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -11,6 +12,6 @@ export async function GET(request: Request) {
   const maxPrice = Number(searchParams.get('maxPrice') || '7000');
   const sort = searchParams.get('sort') || 'discount';
 
-  const data = getDeals({ brand, minDiscount, minPrice, maxPrice, sort });
+  const data = await getDeals({ brand, minDiscount, minPrice, maxPrice, sort });
   return NextResponse.json(data);
 }
