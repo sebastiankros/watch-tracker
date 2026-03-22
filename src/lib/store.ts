@@ -1,7 +1,7 @@
 // Real data store — multi-marketplace scraping
 // No fake data. Every listing is real with a real URL.
 
-import { scrapeAllMarketplaces, scrapeEbaySold, calculateMarketStats, type ScrapedListing } from './scraper';
+import { scrapeAllMarketplaces, calculateMarketStats, type ScrapedListing } from './scraper';
 
 // Watches we actively track — scrape on demand
 const TRACKED_WATCHES = [
@@ -125,14 +125,8 @@ async function scrapeAndCache(tracked: typeof TRACKED_WATCHES[number]): Promise<
   if (existing && isCacheFresh(existing)) return existing;
 
   try {
-    // Scrape all marketplaces (eBay US/UK + Chrono24 + Watchfinder) + sold data
-    const [activeListings, soldListings] = await Promise.all([
-      scrapeAllMarketplaces(tracked.query).catch(() => [] as ScrapedListing[]),
-      scrapeEbaySold(tracked.query).catch(() => [] as ScrapedListing[]),
-    ]);
-
-    // Use sold data for market price (more accurate), fallback to active
-    const forPricing = soldListings.length >= 3 ? soldListings : [...soldListings, ...activeListings];
+    // Scrape Chrono24 + Watchfinder (verified accurate prices)
+    const activeListings = await scrapeAllMarketplaces(tracked.query).catch(() => [] as ScrapedListing[]);
     let inRange = activeListings.filter((l) => l.price && l.price >= 500 && l.price <= 7000);
 
     // Remove outliers
@@ -143,7 +137,7 @@ async function scrapeAndCache(tracked: typeof TRACKED_WATCHES[number]): Promise<
       const ceiling = median * 2.0;
       inRange = inRange.filter((l) => l.price! >= floor && l.price! <= ceiling);
     }
-    const stats = calculateMarketStats(forPricing, 500, 7000);
+    const stats = calculateMarketStats(activeListings, 500, 7000);
 
     if (!stats.marketPrice || inRange.length === 0) {
       // Return existing cache even if stale, or empty

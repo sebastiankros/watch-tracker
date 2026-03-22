@@ -1,4 +1,3 @@
-import * as https from 'https';
 import * as http from 'http';
 
 export interface ScrapedListing {
@@ -22,38 +21,7 @@ export interface ScrapedMarketData {
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || '';
 
 /**
- * Direct fetch (for sites that don't block, like eBay)
- */
-function fetchPage(urlStr: string, maxRedirects = 3): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (maxRedirects <= 0) return reject(new Error('Too many redirects'));
-    const url = new URL(urlStr);
-    const options = {
-      hostname: url.hostname,
-      path: url.pathname + url.search,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'identity',
-      },
-    };
-    https.get(options, (res) => {
-      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        const loc = res.headers.location.startsWith('http')
-          ? res.headers.location
-          : `https://${url.hostname}${res.headers.location}`;
-        return fetchPage(loc, maxRedirects - 1).then(resolve).catch(reject);
-      }
-      let data = '';
-      res.on('data', (c: string) => (data += c));
-      res.on('end', () => resolve(data));
-    }).on('error', reject);
-  });
-}
-
-/**
- * Fetch via ScraperAPI proxy (for sites that block direct access or need JS rendering)
+ * Fetch via ScraperAPI proxy with JS rendering
  */
 function fetchViaProxy(targetUrl: string, render = true): Promise<string> {
   if (!SCRAPER_API_KEY) return Promise.reject(new Error('No SCRAPER_API_KEY'));
@@ -65,7 +33,7 @@ function fetchViaProxy(targetUrl: string, render = true): Promise<string> {
   const proxyUrl = `http://api.scraperapi.com?${params.toString()}`;
 
   return new Promise((resolve, reject) => {
-    http.get(proxyUrl, { timeout: 45000 }, (res) => {
+    const req = http.get(proxyUrl, { timeout: 60000 }, (res) => {
       let data = '';
       res.on('data', (c: string) => (data += c));
       res.on('end', () => {
@@ -74,7 +42,9 @@ function fetchViaProxy(targetUrl: string, render = true): Promise<string> {
         }
         resolve(data);
       });
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
   });
 }
 
@@ -95,8 +65,6 @@ function isJunkListing(title: string): boolean {
     /\bfor parts\b/,
     /\bnot working\b/,
     /\bjunk\b/,
-    /go to previous slide/i,
-    /shop on ebay/i,
   ];
 
   for (const pattern of junkPatterns) {
@@ -106,102 +74,24 @@ function isJunkListing(title: string): boolean {
   return false;
 }
 
-// ===== eBay scrapers (direct, no proxy needed) =====
+// ===== Chrono24 scraper =====
 
-function parseEbayHtml(
-  html: string,
-  domain: string,
-  source: string,
-  query: string,
-  currencySymbol: string,
-  minPrice: number,
-  maxPrice: number,
-): ScrapedListing[] {
-  const listings: ScrapedListing[] = [];
-  const seen = new Set<string>();
-
-  const itemPattern = new RegExp(`https?://www\\.${domain.replace('.', '\\.')}/itm/(\\d+)`, 'g');
-  const itemIdMatches = html.matchAll(itemPattern);
-  const allIds: string[] = [];
-  for (const m of itemIdMatches) {
-    if (!allIds.includes(m[1])) allIds.push(m[1]);
-  }
-
-  for (const itemId of allIds) {
-    if (seen.has(itemId)) continue;
-    seen.add(itemId);
-
-    const itemUrl = `https://www.${domain}/itm/${itemId}`;
-    const pos = html.indexOf(itemUrl);
-    if (pos === -1) continue;
-
-    const context = html.substring(Math.max(0, pos - 3000), pos + 3000);
-
-    const titleMatch = context.match(/(?:aria-label|title)="([^"]{15,150})"/);
-    let title = titleMatch ? titleMatch[1] : '';
-    title = title.replace(/^New Listing\s*/i, '').trim();
-
-    if (!title || isJunkListing(title)) continue;
-    if (/^(Shop on eBay|Go to|Results|See more)/.test(title)) continue;
-
-    const escapedSymbol = currencySymbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const priceRegex = new RegExp(`${escapedSymbol}([\\d.,]+)`, 'g');
-    const priceMatches = [...context.matchAll(priceRegex)];
-    if (priceMatches.length === 0) continue;
-
-    let price: number | null = null;
-    for (const pm of priceMatches) {
-      let raw = pm[1];
-      if (currencySymbol === 'EUR ' || currencySymbol === '£') {
-        raw = raw.replace(/\./g, '').replace(',', '.');
-      }
-      const p = parseFloat(raw.replace(/,/g, ''));
-      if (p >= minPrice && p <= maxPrice) {
-        price = p;
-        break;
-      }
-    }
-    if (!price) continue;
-
-    const queryWords = query.toLowerCase().split(/\s+/);
-    const titleLower = title.toLowerCase();
-    const matchCount = queryWords.filter((w) => titleLower.includes(w.toLowerCase())).length;
-    if (matchCount < Math.min(2, queryWords.length)) continue;
-
-    listings.push({ title, price, url: itemUrl, source, postedAgo: '' });
-  }
-
-  return listings;
+interface C24Offer {
+  name?: string;
+  price?: string | number;
+  url?: string;
+  '@type'?: string;
 }
 
-export async function scrapeEbay(query: string): Promise<ScrapedListing[]> {
-  const encoded = encodeURIComponent(query);
-  const url = `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1&_udlo=500&_udhi=7000&_sop=12`;
-  const html = await fetchPage(url);
-  return parseEbayHtml(html, 'ebay.com', 'eBay', query, '$', 500, 7000);
+interface C24GraphEntry {
+  '@type'?: string;
+  offers?: C24Offer | C24Offer[];
+  itemListElement?: unknown[];
 }
 
-export async function scrapeEbayUK(query: string): Promise<ScrapedListing[]> {
-  const encoded = encodeURIComponent(query);
-  const url = `https://www.ebay.co.uk/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1&_udlo=400&_udhi=5600&_sop=12`;
-  const html = await fetchPage(url);
-  const GBP_TO_USD = 1.27;
-  const listings = parseEbayHtml(html, 'ebay.co.uk', 'eBay UK', query, '£', 400, 5600);
-  return listings.map((l) => ({
-    ...l,
-    price: l.price ? Math.round(l.price * GBP_TO_USD) : null,
-  }));
+interface C24JsonLd {
+  '@graph'?: C24GraphEntry[];
 }
-
-export async function scrapeEbaySold(query: string): Promise<ScrapedListing[]> {
-  const encoded = encodeURIComponent(query);
-  const url = `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_Complete=1&LH_Sold=1&_udlo=500&_udhi=7000`;
-  const html = await fetchPage(url);
-  const listings = parseEbayHtml(html, 'ebay.com', 'eBay (Sold)', query, '$', 500, 7000);
-  return listings.map((l) => ({ ...l, postedAgo: 'sold' }));
-}
-
-// ===== Chrono24 scraper (via ScraperAPI) =====
 
 export async function scrapeChrono24(query: string): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
@@ -211,40 +101,70 @@ export async function scrapeChrono24(query: string): Promise<ScrapedListing[]> {
   const listings: ScrapedListing[] = [];
   const seen = new Set<string>();
 
-  // Chrono24 embeds structured JSON-LD Offer data
-  const offerBlocks = [...html.matchAll(/"@type"\s*:\s*"Offer"[\s\S]*?"name"\s*:\s*"([^"]+)"[\s\S]*?"price"\s*:\s*"(\d+)"[\s\S]*?"url"\s*:\s*"([^"]+)"/g)];
+  // Parse JSON-LD structured data from the page
+  const jsonLdMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  if (!jsonLdMatch) return listings;
 
-  for (const match of offerBlocks) {
-    const title = match[1].trim();
-    const price = parseInt(match[2], 10);
-    const url = match[3];
+  try {
+    const data: C24JsonLd = JSON.parse(jsonLdMatch[1]);
+    const graph = data['@graph'] || [];
 
-    const id = url.match(/--id(\d+)/)?.[1];
-    if (id && seen.has(id)) continue;
-    if (id) seen.add(id);
+    // Find the AggregateOffer entry which contains all listing offers
+    for (const entry of graph) {
+      if (!entry.offers) continue;
+      const offers = Array.isArray(entry.offers) ? entry.offers : [entry.offers];
 
-    if (!title || isJunkListing(title)) continue;
-    if (price < 500 || price > 7000) continue;
+      for (const offer of offers) {
+        if (!offer.name || !offer.price || !offer.url) continue;
 
-    // Validate title matches query
-    const queryWords = query.toLowerCase().split(/\s+/);
-    const titleLower = title.toLowerCase();
-    const matchCount = queryWords.filter((w) => titleLower.includes(w)).length;
-    if (matchCount < Math.min(2, queryWords.length)) continue;
+        const title = String(offer.name).trim();
+        const price = typeof offer.price === 'string' ? parseInt(offer.price, 10) : offer.price;
+        const url = String(offer.url);
 
-    listings.push({
-      title,
-      price,
-      url,
-      source: 'Chrono24',
-      postedAgo: '',
-    });
+        const id = url.match(/--id(\d+)/)?.[1];
+        if (id && seen.has(id)) continue;
+        if (id) seen.add(id);
+
+        if (!title || isJunkListing(title)) continue;
+        if (price < 500 || price > 7000) continue;
+
+        // Validate title relevance
+        const queryWords = query.toLowerCase().split(/\s+/);
+        const titleLower = title.toLowerCase();
+        const matchCount = queryWords.filter((w) => titleLower.includes(w)).length;
+        if (matchCount < Math.min(2, queryWords.length)) continue;
+
+        listings.push({
+          title,
+          price,
+          url,
+          source: 'Chrono24',
+          postedAgo: '',
+        });
+      }
+    }
+  } catch {
+    // Fallback: regex extraction if JSON parsing fails
+    const offerBlocks = [...html.matchAll(/"name"\s*:\s*"([^"]+)"[\s\S]*?"price"\s*:\s*"(\d+)"[\s\S]*?"url"\s*:\s*"([^"]+)"/g)];
+    for (const match of offerBlocks) {
+      const title = match[1].trim();
+      const price = parseInt(match[2], 10);
+      const url = match[3];
+
+      const id = url.match(/--id(\d+)/)?.[1];
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+
+      if (!title || isJunkListing(title) || price < 500 || price > 7000) continue;
+
+      listings.push({ title, price, url, source: 'Chrono24', postedAgo: '' });
+    }
   }
 
   return listings;
 }
 
-// ===== Watchfinder scraper (via ScraperAPI) =====
+// ===== Watchfinder scraper =====
 
 export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
@@ -254,7 +174,6 @@ export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]
   const listings: ScrapedListing[] = [];
   const seen = new Set<string>();
 
-  // Watchfinder uses product-card elements with data-product-id
   const cards = [...html.matchAll(/class="product-card[^"]*"[^>]*data-product-id="(\d+)"[^>]*href="([^"]+)"[\s\S]*?<\/a>/g)];
 
   for (const card of cards) {
@@ -265,13 +184,11 @@ export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]
     if (seen.has(productId)) continue;
     seen.add(productId);
 
-    // Extract title from itemprop="name" or title-like elements
     const titleMatch = cardHtml.match(/itemprop="name"[^>]*>([^<]+)/) ||
       cardHtml.match(/class="[^"]*title[^"]*"[^>]*>([^<]+)/) ||
       cardHtml.match(/alt="([^"]+)"/);
     const title = titleMatch ? titleMatch[1].trim() : '';
 
-    // Extract price
     const priceMatch = cardHtml.match(/\$([\d,]+)/);
     if (!priceMatch) continue;
     const price = parseInt(priceMatch[1].replace(/,/g, ''), 10);
@@ -279,7 +196,6 @@ export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]
     if (!title || isJunkListing(title)) continue;
     if (price < 500 || price > 7000) continue;
 
-    // Validate title matches query
     const queryWords = query.toLowerCase().split(/\s+/);
     const titleLower = title.toLowerCase();
     const matchCount = queryWords.filter((w) => titleLower.includes(w)).length;
@@ -302,30 +218,21 @@ export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]
 // ===== Combined scrapers =====
 
 /**
- * Scrape all marketplaces for active listings.
- * eBay (direct) + Chrono24 & Watchfinder (via ScraperAPI)
+ * Scrape all marketplaces: Chrono24 + Watchfinder
+ * Both provide verified accurate prices with direct purchase links.
  */
 export async function scrapeAllMarketplaces(query: string): Promise<ScrapedListing[]> {
-  const scrapers: Promise<ScrapedListing[]>[] = [
-    scrapeEbay(query).catch(() => []),
-    scrapeEbayUK(query).catch(() => []),
-  ];
+  if (!SCRAPER_API_KEY) return [];
 
-  // Only use proxy scrapers if API key is configured
-  if (SCRAPER_API_KEY) {
-    scrapers.push(
-      scrapeChrono24(query).catch(() => []),
-      scrapeWatchfinder(query).catch(() => []),
-    );
-  }
+  const [c24, wf] = await Promise.all([
+    scrapeChrono24(query).catch(() => [] as ScrapedListing[]),
+    scrapeWatchfinder(query).catch(() => [] as ScrapedListing[]),
+  ]);
 
-  const results = await Promise.all(scrapers);
-  const all = results.flat();
-
-  // Deduplicate by URL stem (item ID or path)
+  // Deduplicate by URL
   const seen = new Set<string>();
   const combined: ScrapedListing[] = [];
-  for (const listing of all) {
+  for (const listing of [...c24, ...wf]) {
     const key = listing.url.replace(/[?#].*$/, '');
     if (seen.has(key)) continue;
     seen.add(key);
@@ -335,7 +242,7 @@ export async function scrapeAllMarketplaces(query: string): Promise<ScrapedListi
   return combined;
 }
 
-// Keep backward-compatible alias
+// Backward compat alias
 export const scrapeAllEbay = scrapeAllMarketplaces;
 
 /**
@@ -345,10 +252,8 @@ export function getMarketplaceSearchUrls(query: string) {
   const encoded = encodeURIComponent(query);
   return {
     chrono24: `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true`,
-    ebay: `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1`,
-    ebayUK: `https://www.ebay.co.uk/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1`,
     watchfinder: `https://www.watchfinder.com/search?q=${encoded}`,
-    ebaySold: `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_Complete=1&LH_Sold=1`,
+    ebay: `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1`,
   };
 }
 
@@ -391,16 +296,21 @@ export function calculateMarketStats(listings: ScrapedListing[], minPrice = 500,
 }
 
 /**
- * Full scrape: All marketplaces active + eBay sold for market pricing
+ * Scrape eBay sold listings for additional market price data (no render needed)
+ */
+export async function scrapeEbaySold(_query: string): Promise<ScrapedListing[]> {
+  // eBay search doesn't include prices in HTML — disabled
+  return [];
+}
+
+/**
+ * Full scrape: Chrono24 + Watchfinder for listings and market pricing
  */
 export async function scrapeWatch(query: string): Promise<ScrapedMarketData> {
-  const [activeListings, soldListings] = await Promise.all([
-    scrapeAllMarketplaces(query).catch(() => [] as ScrapedListing[]),
-    scrapeEbaySold(query).catch(() => [] as ScrapedListing[]),
-  ]);
+  const activeListings = await scrapeAllMarketplaces(query).catch(() => [] as ScrapedListing[]);
 
-  const forPricing = soldListings.length >= 3 ? soldListings : [...soldListings, ...activeListings];
-  const stats = calculateMarketStats(forPricing, 500, 7000);
+  // Market price from combined Chrono24 + Watchfinder data
+  const stats = calculateMarketStats(activeListings, 500, 7000);
 
   return {
     listings: activeListings,
