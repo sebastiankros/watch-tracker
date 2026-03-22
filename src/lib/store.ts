@@ -223,7 +223,11 @@ async function scrapeAll(): Promise<CachedWatch[]> {
   return results;
 }
 
+// Max watches to scrape per request (ScraperAPI render calls are slow ~30s each)
+const MAX_SCRAPE_PER_REQUEST = 3;
+
 // Get all watches, using cache when fresh
+// Only scrapes a few at a time to stay within Vercel's timeout
 async function getAllCached(): Promise<CachedWatch[]> {
   const results: CachedWatch[] = [];
   const toScrape: typeof TRACKED_WATCHES[number][] = [];
@@ -238,17 +242,11 @@ async function getAllCached(): Promise<CachedWatch[]> {
     }
   }
 
-  // Scrape missing/stale ones in batches
+  // Only scrape a few at a time — each ScraperAPI call takes ~30s
   if (toScrape.length > 0) {
-    const batchSize = 5;
-    for (let i = 0; i < toScrape.length; i += batchSize) {
-      const batch = toScrape.slice(i, i + batchSize);
-      const batchResults = await Promise.all(batch.map((t) => scrapeAndCache(t)));
-      results.push(...batchResults);
-      if (i + batchSize < toScrape.length) {
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    }
+    const batch = toScrape.slice(0, MAX_SCRAPE_PER_REQUEST);
+    const batchResults = await Promise.all(batch.map((t) => scrapeAndCache(t)));
+    results.push(...batchResults);
   }
 
   return results.filter((r) => r.watch.marketPrice > 0);
@@ -442,11 +440,13 @@ export function searchWatches(q: string) {
 export async function refreshMarketData() {
   // Clear cache to force fresh scrapes
   cache.clear();
-  const results = await scrapeAll();
+  // Scrape a small batch (full refresh happens gradually as pages are visited)
+  const batch = TRACKED_WATCHES.slice(0, MAX_SCRAPE_PER_REQUEST);
+  const results = await Promise.all(batch.map((t) => scrapeAndCache(t)));
   const scraped = results.filter((r) => r.watch.marketPrice > 0).length;
   return {
     success: true,
-    message: `Scraped real data for ${scraped}/${TRACKED_WATCHES.length} watches`,
+    message: `Scraped ${scraped} watches. Others will load as you browse. (${TRACKED_WATCHES.length} total tracked)`,
     timestamp: new Date().toISOString(),
   };
 }

@@ -218,16 +218,21 @@ export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]
 // ===== Combined scrapers =====
 
 /**
- * Scrape all marketplaces: Chrono24 + Watchfinder
- * Both provide verified accurate prices with direct purchase links.
+ * Scrape all marketplaces: Chrono24 (primary) + Watchfinder (bonus).
+ * Chrono24 alone gives 30+ listings per watch with verified prices.
+ * Watchfinder is added only if Chrono24 completes fast enough.
  */
 export async function scrapeAllMarketplaces(query: string): Promise<ScrapedListing[]> {
   if (!SCRAPER_API_KEY) return [];
 
-  const [c24, wf] = await Promise.all([
-    scrapeChrono24(query).catch(() => [] as ScrapedListing[]),
-    scrapeWatchfinder(query).catch(() => [] as ScrapedListing[]),
-  ]);
+  // Chrono24 is primary — always fetch. Watchfinder is bonus.
+  const c24 = await scrapeChrono24(query).catch(() => [] as ScrapedListing[]);
+
+  // Only fetch Watchfinder if Chrono24 returned few results
+  let wf: ScrapedListing[] = [];
+  if (c24.length < 10) {
+    wf = await scrapeWatchfinder(query).catch(() => [] as ScrapedListing[]);
+  }
 
   // Deduplicate by URL
   const seen = new Set<string>();
