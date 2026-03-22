@@ -1,7 +1,7 @@
 // Real data store — powered by WatchRecon scraping
 // No fake data. Every listing is real with a real URL.
 
-import { scrapeEbay, scrapeEbaySold, calculateMarketStats, type ScrapedListing } from './scraper';
+import { scrapeAllEbay, scrapeEbaySold, calculateMarketStats, type ScrapedListing } from './scraper';
 
 // Watches we actively track — scrape on demand
 const TRACKED_WATCHES = [
@@ -125,9 +125,9 @@ async function scrapeAndCache(tracked: typeof TRACKED_WATCHES[number]): Promise<
   if (existing && isCacheFresh(existing)) return existing;
 
   try {
-    // Scrape eBay active + sold listings
+    // Scrape all eBay marketplaces (US+UK+DE) + sold listings
     const [activeListings, soldListings] = await Promise.all([
-      scrapeEbay(tracked.query).catch(() => [] as ScrapedListing[]),
+      scrapeAllEbay(tracked.query).catch(() => [] as ScrapedListing[]),
       scrapeEbaySold(tracked.query).catch(() => [] as ScrapedListing[]),
     ]);
 

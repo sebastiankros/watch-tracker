@@ -75,20 +75,23 @@ function isJunkListing(title: string): boolean {
 }
 
 /**
- * Scrape eBay Buy It Now listings for a watch query.
- * Returns real dealer listings with direct purchase links.
+ * Parse eBay search results HTML into listings.
+ * Works for ebay.com, ebay.co.uk, ebay.de etc.
  */
-export async function scrapeEbay(query: string): Promise<ScrapedListing[]> {
-  const encoded = encodeURIComponent(query);
-  // _sacat=31387 = Wristwatches category, LH_BIN=1 = Buy It Now only
-  const url = `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1&_udlo=500&_udhi=7000&_sop=12`;
-  const html = await fetchPage(url);
-
+function parseEbayHtml(
+  html: string,
+  domain: string,
+  source: string,
+  query: string,
+  currencySymbol: string,
+  minPrice: number,
+  maxPrice: number,
+): ScrapedListing[] {
   const listings: ScrapedListing[] = [];
   const seen = new Set<string>();
 
-  // Extract unique item IDs
-  const itemIdMatches = html.matchAll(/https:\/\/www\.ebay\.com\/itm\/(\d+)/g);
+  const itemPattern = new RegExp(`https?://www\\.${domain.replace('.', '\\.')}/itm/(\\d+)`, 'g');
+  const itemIdMatches = html.matchAll(itemPattern);
   const allIds: string[] = [];
   for (const m of itemIdMatches) {
     if (!allIds.includes(m[1])) allIds.push(m[1]);
@@ -98,120 +101,111 @@ export async function scrapeEbay(query: string): Promise<ScrapedListing[]> {
     if (seen.has(itemId)) continue;
     seen.add(itemId);
 
-    // Find context around this item ID in the HTML to extract title and price
-    const itemUrl = `https://www.ebay.com/itm/${itemId}`;
+    const itemUrl = `https://www.${domain}/itm/${itemId}`;
     const pos = html.indexOf(itemUrl);
     if (pos === -1) continue;
 
     const context = html.substring(Math.max(0, pos - 3000), pos + 3000);
 
-    // Extract title from aria-label or title attribute
     const titleMatch = context.match(/(?:aria-label|title)="([^"]{15,150})"/);
     let title = titleMatch ? titleMatch[1] : '';
-
-    // Clean up title
     title = title.replace(/^New Listing\s*/i, '').trim();
 
-    // Skip junk
     if (!title || isJunkListing(title)) continue;
     if (/^(Shop on eBay|Go to|Results|See more)/.test(title)) continue;
 
-    // Extract price
-    const priceMatches = context.match(/\$([\d,]+\.\d{2})/g);
-    if (!priceMatches || priceMatches.length === 0) continue;
+    // Extract price using currency symbol
+    const escapedSymbol = currencySymbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const priceRegex = new RegExp(`${escapedSymbol}([\\d.,]+)`, 'g');
+    const priceMatches = [...context.matchAll(priceRegex)];
+    if (priceMatches.length === 0) continue;
 
-    // Get the first reasonable price (closest to the item)
     let price: number | null = null;
     for (const pm of priceMatches) {
-      const p = parseFloat(pm.replace(/[$,]/g, ''));
-      if (p >= 500 && p <= 7000) {
+      // Handle both US (1,234.56) and EU (1.234,56) number formats
+      let raw = pm[1];
+      if (currencySymbol === 'EUR ' || currencySymbol === '£') {
+        // EU format: 1.234,56 → 1234.56
+        raw = raw.replace(/\./g, '').replace(',', '.');
+      }
+      const p = parseFloat(raw.replace(/,/g, ''));
+      if (p >= minPrice && p <= maxPrice) {
         price = p;
         break;
       }
     }
     if (!price) continue;
 
-    // Skip if title doesn't contain relevant watch keywords
     const queryWords = query.toLowerCase().split(/\s+/);
     const titleLower = title.toLowerCase();
     const matchCount = queryWords.filter((w) => titleLower.includes(w.toLowerCase())).length;
     if (matchCount < Math.min(2, queryWords.length)) continue;
 
-    listings.push({
-      title,
-      price,
-      url: itemUrl,
-      source: 'eBay',
-      postedAgo: '',
-    });
+    listings.push({ title, price, url: itemUrl, source, postedAgo: '' });
   }
 
   return listings;
 }
 
 /**
+ * Scrape eBay US Buy It Now listings.
+ */
+export async function scrapeEbay(query: string): Promise<ScrapedListing[]> {
+  const encoded = encodeURIComponent(query);
+  const url = `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1&_udlo=500&_udhi=7000&_sop=12`;
+  const html = await fetchPage(url);
+  return parseEbayHtml(html, 'ebay.com', 'eBay', query, '$', 500, 7000);
+}
+
+/**
+ * Scrape eBay UK Buy It Now listings (prices in GBP, converted to USD).
+ */
+export async function scrapeEbayUK(query: string): Promise<ScrapedListing[]> {
+  const encoded = encodeURIComponent(query);
+  const url = `https://www.ebay.co.uk/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1&_udlo=400&_udhi=5600&_sop=12`;
+  const html = await fetchPage(url);
+  const GBP_TO_USD = 1.27;
+  const listings = parseEbayHtml(html, 'ebay.co.uk', 'eBay UK', query, '£', 400, 5600);
+  // Convert GBP to USD
+  return listings.map((l) => ({
+    ...l,
+    price: l.price ? Math.round(l.price * GBP_TO_USD) : null,
+  }));
+}
+
+
+/**
  * Scrape eBay sold/completed listings for market value calculation
  */
 export async function scrapeEbaySold(query: string): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
-  // LH_Complete=1&LH_Sold=1 = Sold listings only
   const url = `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_Complete=1&LH_Sold=1&_udlo=500&_udhi=7000`;
   const html = await fetchPage(url);
+  const listings = parseEbayHtml(html, 'ebay.com', 'eBay (Sold)', query, '$', 500, 7000);
+  return listings.map((l) => ({ ...l, postedAgo: 'sold' }));
+}
 
-  const listings: ScrapedListing[] = [];
+/**
+ * Scrape all eBay marketplaces (US + UK + DE) for maximum coverage.
+ * Returns combined, deduplicated listings from all three.
+ */
+export async function scrapeAllEbay(query: string): Promise<ScrapedListing[]> {
+  const [us, uk] = await Promise.all([
+    scrapeEbay(query).catch(() => [] as ScrapedListing[]),
+    scrapeEbayUK(query).catch(() => [] as ScrapedListing[]),
+  ]);
+
+  // Deduplicate by item ID (same item can appear on multiple eBay domains)
   const seen = new Set<string>();
-
-  const itemIdMatches = html.matchAll(/https:\/\/www\.ebay\.com\/itm\/(\d+)/g);
-  const allIds: string[] = [];
-  for (const m of itemIdMatches) {
-    if (!allIds.includes(m[1])) allIds.push(m[1]);
+  const combined: ScrapedListing[] = [];
+  for (const listing of [...us, ...uk]) {
+    const itemId = listing.url.match(/itm\/(\d+)/)?.[1];
+    if (itemId && seen.has(itemId)) continue;
+    if (itemId) seen.add(itemId);
+    combined.push(listing);
   }
 
-  for (const itemId of allIds) {
-    if (seen.has(itemId)) continue;
-    seen.add(itemId);
-
-    const itemUrl = `https://www.ebay.com/itm/${itemId}`;
-    const pos = html.indexOf(itemUrl);
-    if (pos === -1) continue;
-
-    const context = html.substring(Math.max(0, pos - 3000), pos + 3000);
-
-    const titleMatch = context.match(/(?:aria-label|title)="([^"]{15,150})"/);
-    let title = titleMatch ? titleMatch[1] : '';
-    title = title.replace(/^New Listing\s*/i, '').trim();
-
-    if (!title || isJunkListing(title)) continue;
-    if (/^(Shop on eBay|Go to|Results|See more)/.test(title)) continue;
-
-    const priceMatches = context.match(/\$([\d,]+\.\d{2})/g);
-    if (!priceMatches) continue;
-
-    let price: number | null = null;
-    for (const pm of priceMatches) {
-      const p = parseFloat(pm.replace(/[$,]/g, ''));
-      if (p >= 500 && p <= 7000) {
-        price = p;
-        break;
-      }
-    }
-    if (!price) continue;
-
-    const queryWords = query.toLowerCase().split(/\s+/);
-    const titleLower = title.toLowerCase();
-    const matchCount = queryWords.filter((w) => titleLower.includes(w.toLowerCase())).length;
-    if (matchCount < Math.min(2, queryWords.length)) continue;
-
-    listings.push({
-      title,
-      price,
-      url: itemUrl,
-      source: 'eBay (Sold)',
-      postedAgo: 'sold',
-    });
-  }
-
-  return listings;
+  return combined;
 }
 
 /**
@@ -222,6 +216,7 @@ export function getMarketplaceSearchUrls(query: string) {
   return {
     chrono24: `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true`,
     ebay: `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1`,
+    ebayUK: `https://www.ebay.co.uk/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1`,
     ebaySold: `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_Complete=1&LH_Sold=1`,
     jomashop: `https://www.jomashop.com/search?q=${encoded}`,
     watchbox: `https://www.thewatchbox.com/shop/?q=${encoded}`,
@@ -267,12 +262,12 @@ export function calculateMarketStats(listings: ScrapedListing[], minPrice = 500,
 }
 
 /**
- * Full scrape: eBay active listings + sold data for market price
+ * Full scrape: All eBay marketplaces (US+UK+DE) active + US sold data for market price
  */
 export async function scrapeWatch(query: string): Promise<ScrapedMarketData> {
-  // Scrape active Buy It Now listings and sold listings in parallel
+  // Scrape all eBay marketplaces for active listings + US sold for pricing
   const [activeListings, soldListings] = await Promise.all([
-    scrapeEbay(query).catch(() => [] as ScrapedListing[]),
+    scrapeAllEbay(query).catch(() => [] as ScrapedListing[]),
     scrapeEbaySold(query).catch(() => [] as ScrapedListing[]),
   ]);
 
