@@ -376,30 +376,28 @@ export async function scrapeJomashop(query: string, maxPrice = 50000): Promise<S
 // ===== Combined scrapers =====
 
 /**
- * Scrape all marketplaces: Chrono24 (primary) + eBay + Watchfinder + Jomashop.
- * Chrono24 runs first. Secondary sources run in parallel if needed.
+ * Scrape all marketplaces in parallel: Chrono24 + eBay + Watchfinder + Jomashop.
+ * All sources fire simultaneously to minimize wall time.
  */
 export async function scrapeAllMarketplaces(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   if (!SCRAPER_API_KEY) return [];
 
-  // Chrono24 is primary — always fetch
-  const c24 = await scrapeChrono24(query, maxPrice).catch(() => [] as ScrapedListing[]);
-
-  // Fetch secondary sources in parallel
-  const secondaryResults = await Promise.allSettled([
+  // All sources in parallel — wall time = slowest single source
+  const results = await Promise.allSettled([
+    scrapeChrono24(query, maxPrice),
     scrapeEbay(query, maxPrice),
     scrapeWatchfinder(query, maxPrice),
     scrapeJomashop(query, maxPrice),
   ]);
 
-  const secondary = secondaryResults.flatMap((r) =>
+  const allListings = results.flatMap((r) =>
     r.status === 'fulfilled' ? r.value : []
   );
 
   // Deduplicate by cleaned URL
   const seen = new Set<string>();
   const combined: ScrapedListing[] = [];
-  for (const listing of [...c24, ...secondary]) {
+  for (const listing of allListings) {
     const key = listing.url.replace(/[?#].*$/, '').replace(/\/+$/, '');
     if (seen.has(key)) continue;
     seen.add(key);

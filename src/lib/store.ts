@@ -245,11 +245,10 @@ async function scrapeAll(): Promise<CachedWatch[]> {
   return results;
 }
 
-// Max watches to scrape per request (ScraperAPI render calls are slow ~30s each)
-const MAX_SCRAPE_PER_REQUEST = 3;
+// Max watches to scrape per request — run in parallel so wall time ≈ slowest single scrape
+const MAX_SCRAPE_PER_REQUEST = 10;
 
 // Get all watches, using cache when fresh
-// Only scrapes a few at a time to stay within Vercel's timeout
 async function getAllCached(): Promise<CachedWatch[]> {
   const results: CachedWatch[] = [];
   const toScrape: typeof TRACKED_WATCHES[number][] = [];
@@ -264,11 +263,13 @@ async function getAllCached(): Promise<CachedWatch[]> {
     }
   }
 
-  // Only scrape a few at a time — each ScraperAPI call takes ~30s
+  // Scrape in parallel — all watches hit ScraperAPI concurrently
   if (toScrape.length > 0) {
     const batch = toScrape.slice(0, MAX_SCRAPE_PER_REQUEST);
-    const batchResults = await Promise.all(batch.map((t) => scrapeAndCache(t)));
-    results.push(...batchResults);
+    const batchResults = await Promise.allSettled(batch.map((t) => scrapeAndCache(t)));
+    for (const r of batchResults) {
+      if (r.status === 'fulfilled') results.push(r.value);
+    }
   }
 
   return results.filter((r) => r.watch.marketPrice > 0);
@@ -508,10 +509,10 @@ export function searchWatches(q: string) {
 export async function refreshMarketData() {
   // Clear cache to force fresh scrapes
   cache.clear();
-  // Scrape a small batch (full refresh happens gradually as pages are visited)
+  // Scrape in parallel — wall time ≈ one scrape
   const batch = TRACKED_WATCHES.slice(0, MAX_SCRAPE_PER_REQUEST);
-  const results = await Promise.all(batch.map((t) => scrapeAndCache(t)));
-  const scraped = results.filter((r) => r.watch.marketPrice > 0).length;
+  const results = await Promise.allSettled(batch.map((t) => scrapeAndCache(t)));
+  const scraped = results.filter((r) => r.status === 'fulfilled' && r.value.watch.marketPrice > 0).length;
   return {
     success: true,
     message: `Scraped ${scraped} watches. Others will load as you browse. (${TRACKED_WATCHES.length} total tracked)`,
