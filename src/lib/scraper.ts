@@ -95,7 +95,8 @@ interface C24JsonLd {
 
 export async function scrapeChrono24(query: string): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
-  const targetUrl = `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true`;
+  // usedWhere=us filters to dealers that ship to the USA
+  const targetUrl = `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true&usedWhere=us&priceTo=7000&priceFrom=500`;
   const html = await fetchViaProxy(targetUrl, true);
 
   const listings: ScrapedListing[] = [];
@@ -168,7 +169,8 @@ export async function scrapeChrono24(query: string): Promise<ScrapedListing[]> {
 
 export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
-  const targetUrl = `https://www.watchfinder.com/search?q=${encoded}`;
+  // Use .com with USD currency to ensure US-shippable results
+  const targetUrl = `https://www.watchfinder.com/search?q=${encoded}&currency=USD`;
   const html = await fetchViaProxy(targetUrl, true);
 
   const listings: ScrapedListing[] = [];
