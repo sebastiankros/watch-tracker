@@ -217,30 +217,190 @@ export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]
   return listings;
 }
 
+// ===== eBay scraper =====
+
+export async function scrapeEbay(query: string): Promise<ScrapedListing[]> {
+  const encoded = encodeURIComponent(query);
+  // Category 31387 = Wristwatches, LH_ItemCondition=3000 = Pre-owned, LH_PrefLoc=1 = US Only
+  const targetUrl = `https://www.ebay.com/sch/31387/i.html?_nkw=${encoded}&_sop=12&LH_ItemCondition=3000&LH_PrefLoc=1&_udhi=7000&_udlo=500`;
+  const html = await fetchViaProxy(targetUrl, true);
+
+  const listings: ScrapedListing[] = [];
+  const seen = new Set<string>();
+
+  // eBay search results use s-item containers
+  const items = [...html.matchAll(/class="s-item\s[^"]*"[\s\S]*?<\/li>/g)];
+
+  for (const item of items) {
+    const block = item[0];
+
+    // Extract title
+    const titleMatch = block.match(/class="s-item__title"[^>]*>(?:<span[^>]*>)?([^<]+)/);
+    if (!titleMatch) continue;
+    const title = titleMatch[1].trim();
+    if (title === 'Shop on eBay' || title === 'Results matching fewer words') continue;
+
+    // Extract price — look for s-item__price specifically
+    const priceMatch = block.match(/class="s-item__price"[^>]*>\s*\$?([\d,]+(?:\.\d{2})?)/);
+    if (!priceMatch) continue;
+    const price = parseInt(priceMatch[1].replace(/[,\.]/g, '').slice(0, -2) || priceMatch[1].replace(/,/g, ''), 10);
+    // Handle case where price might have decimals
+    const rawPrice = parseFloat(priceMatch[1].replace(/,/g, ''));
+    const finalPrice = Math.round(rawPrice);
+
+    // Extract URL
+    const urlMatch = block.match(/class="s-item__link"[^>]*href="([^"]+)"/);
+    if (!urlMatch) continue;
+    const url = urlMatch[1].split('?')[0]; // Clean tracking params
+
+    // Deduplicate
+    const itemId = url.match(/\/(\d+)(?:\?|$)/)?.[1] || url;
+    if (seen.has(itemId)) continue;
+    seen.add(itemId);
+
+    if (isJunkListing(title)) continue;
+    if (finalPrice < 500 || finalPrice > 7000) continue;
+
+    // Relevance check
+    const queryWords = query.toLowerCase().split(/\s+/);
+    const titleLower = title.toLowerCase();
+    const matchCount = queryWords.filter((w) => titleLower.includes(w)).length;
+    if (matchCount < Math.min(2, queryWords.length)) continue;
+
+    listings.push({
+      title,
+      price: finalPrice,
+      url,
+      source: 'eBay',
+      postedAgo: '',
+    });
+  }
+
+  return listings;
+}
+
+// ===== Jomashop scraper =====
+
+export async function scrapeJomashop(query: string): Promise<ScrapedListing[]> {
+  const encoded = encodeURIComponent(query);
+  const targetUrl = `https://www.jomashop.com/catalogsearch/result?q=${encoded}`;
+  const html = await fetchViaProxy(targetUrl, true);
+
+  const listings: ScrapedListing[] = [];
+  const seen = new Set<string>();
+
+  // Jomashop uses product-item containers with structured data
+  // Try JSON-LD first
+  const jsonLdBlocks = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
+  for (const block of jsonLdBlocks) {
+    try {
+      const data = JSON.parse(block[1]);
+      const items = Array.isArray(data) ? data : [data];
+      for (const item of items) {
+        if (item['@type'] !== 'Product') continue;
+        const title = item.name?.trim();
+        const offer = Array.isArray(item.offers) ? item.offers[0] : item.offers;
+        if (!offer || !title) continue;
+
+        const price = typeof offer.price === 'string' ? parseFloat(offer.price) : offer.price;
+        const url = item.url || offer.url;
+        if (!price || !url) continue;
+
+        const finalPrice = Math.round(price);
+        const key = url.replace(/[?#].*$/, '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        if (isJunkListing(title)) continue;
+        if (finalPrice < 500 || finalPrice > 7000) continue;
+
+        const queryWords = query.toLowerCase().split(/\s+/);
+        const titleLower = title.toLowerCase();
+        const matchCount = queryWords.filter((w: string) => titleLower.includes(w)).length;
+        if (matchCount < Math.min(2, queryWords.length)) continue;
+
+        listings.push({
+          title,
+          price: finalPrice,
+          url: url.startsWith('http') ? url : `https://www.jomashop.com${url}`,
+          source: 'Jomashop',
+          postedAgo: '',
+        });
+      }
+    } catch {
+      // Skip malformed JSON-LD
+    }
+  }
+
+  // Fallback: regex-based parsing if JSON-LD didn't produce results
+  if (listings.length === 0) {
+    const productCards = [...html.matchAll(/<a[^>]*href="(\/[^"]*\.html)"[^>]*class="[^"]*product[^"]*"[^>]*>[\s\S]*?<\/a>/g)];
+    for (const card of productCards) {
+      const cardHtml = card[0];
+      const path = card[1];
+
+      const titleMatch = cardHtml.match(/class="[^"]*product-name[^"]*"[^>]*>([^<]+)/) ||
+        cardHtml.match(/alt="([^"]+)"/);
+      if (!titleMatch) continue;
+      const title = titleMatch[1].trim();
+
+      const priceMatch = cardHtml.match(/\$([\d,]+(?:\.\d{2})?)/);
+      if (!priceMatch) continue;
+      const price = Math.round(parseFloat(priceMatch[1].replace(/,/g, '')));
+
+      const key = path;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      if (isJunkListing(title)) continue;
+      if (price < 500 || price > 7000) continue;
+
+      const queryWords = query.toLowerCase().split(/\s+/);
+      const titleLower = title.toLowerCase();
+      const matchCount = queryWords.filter((w) => titleLower.includes(w)).length;
+      if (matchCount < Math.min(2, queryWords.length)) continue;
+
+      listings.push({
+        title,
+        price,
+        url: `https://www.jomashop.com${path}`,
+        source: 'Jomashop',
+        postedAgo: '',
+      });
+    }
+  }
+
+  return listings;
+}
+
 // ===== Combined scrapers =====
 
 /**
- * Scrape all marketplaces: Chrono24 (primary) + Watchfinder (bonus).
- * Chrono24 alone gives 30+ listings per watch with verified prices.
- * Watchfinder is added only if Chrono24 completes fast enough.
+ * Scrape all marketplaces: Chrono24 (primary) + eBay + Watchfinder + Jomashop.
+ * Chrono24 runs first. Secondary sources run in parallel if needed.
  */
 export async function scrapeAllMarketplaces(query: string): Promise<ScrapedListing[]> {
   if (!SCRAPER_API_KEY) return [];
 
-  // Chrono24 is primary — always fetch. Watchfinder is bonus.
+  // Chrono24 is primary — always fetch
   const c24 = await scrapeChrono24(query).catch(() => [] as ScrapedListing[]);
 
-  // Only fetch Watchfinder if Chrono24 returned few results
-  let wf: ScrapedListing[] = [];
-  if (c24.length < 10) {
-    wf = await scrapeWatchfinder(query).catch(() => [] as ScrapedListing[]);
-  }
+  // Fetch secondary sources in parallel
+  const secondaryResults = await Promise.allSettled([
+    scrapeEbay(query),
+    scrapeWatchfinder(query),
+    scrapeJomashop(query),
+  ]);
 
-  // Deduplicate by URL
+  const secondary = secondaryResults.flatMap((r) =>
+    r.status === 'fulfilled' ? r.value : []
+  );
+
+  // Deduplicate by cleaned URL
   const seen = new Set<string>();
   const combined: ScrapedListing[] = [];
-  for (const listing of [...c24, ...wf]) {
-    const key = listing.url.replace(/[?#].*$/, '');
+  for (const listing of [...c24, ...secondary]) {
+    const key = listing.url.replace(/[?#].*$/, '').replace(/\/+$/, '');
     if (seen.has(key)) continue;
     seen.add(key);
     combined.push(listing);
@@ -256,7 +416,9 @@ export function getMarketplaceSearchUrls(query: string) {
   const encoded = encodeURIComponent(query);
   return {
     chrono24: `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true&usedWhere=us`,
+    ebay: `https://www.ebay.com/sch/31387/i.html?_nkw=${encoded}&LH_ItemCondition=3000&LH_PrefLoc=1`,
     watchfinder: `https://www.watchfinder.com/search?q=${encoded}&currency=USD`,
+    jomashop: `https://www.jomashop.com/catalogsearch/result?q=${encoded}`,
   };
 }
 

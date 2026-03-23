@@ -1,35 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { formatPrice, timeAgo } from '@/lib/utils';
+import { formatPrice } from '@/lib/utils';
+import {
+  getPortfolioEntries,
+  enrichWithMarketPrices,
+  calculateStats,
+  deleteEntry,
+  markSold,
+  type EnrichedEntry,
+} from '@/lib/portfolio';
 import { SpinnerIcon, TrashIcon, ExternalLinkIcon } from '@/components/Icons';
 import Breadcrumbs from '@/components/Breadcrumbs';
-
-interface PortfolioEntry {
-  id: string;
-  watchId: string | null;
-  brand: string;
-  model: string;
-  reference: string;
-  purchasePrice: number;
-  purchaseDate: string;
-  purchaseSource: string;
-  purchaseUrl: string | null;
-  soldPrice: number | null;
-  soldDate: string | null;
-  soldSource: string | null;
-  fees: number;
-  notes: string;
-  status: 'holding' | 'sold';
-  createdAt: string;
-  currentMarketPrice: number | null;
-  profit: number | null;
-  profitPct: number | null;
-  roi: number | null;
-  unrealizedProfit: number | null;
-  unrealizedPct: number | null;
-}
 
 interface Stats {
   holdingCount: number;
@@ -44,33 +27,39 @@ interface Stats {
 }
 
 export default function PortfolioPage() {
-  const [entries, setEntries] = useState<PortfolioEntry[]>([]);
+  const [entries, setEntries] = useState<EnrichedEntry[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'holding' | 'sold' | 'all'>('holding');
-  const [sellModal, setSellModal] = useState<PortfolioEntry | null>(null);
+  const [sellModal, setSellModal] = useState<EnrichedEntry | null>(null);
 
-  async function loadPortfolio() {
+  const loadPortfolio = useCallback(async () => {
+    const raw = getPortfolioEntries();
+
+    // Fetch market prices to enrich entries
+    const marketPrices = new Map<string, number>();
     try {
-      const res = await fetch('/api/portfolio');
+      const res = await fetch('/api/watches');
       const data = await res.json();
-      setEntries(data.entries || []);
-      setStats(data.stats || null);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }
+      for (const w of (data.watches || [])) {
+        marketPrices.set(w.id, w.marketPrice);
+      }
+    } catch {}
+
+    const enriched = enrichWithMarketPrices(raw, marketPrices);
+    setEntries(enriched);
+    setStats(calculateStats(enriched));
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     loadPortfolio();
-  }, []);
+  }, [loadPortfolio]);
 
-  async function handleDelete(id: string) {
+  function handleDelete(id: string) {
     if (!confirm('Delete this entry?')) return;
-    await fetch(`/api/portfolio?id=${id}`, { method: 'DELETE' });
-    await loadPortfolio();
+    deleteEntry(id);
+    loadPortfolio();
   }
 
   const filtered = tab === 'all' ? entries : entries.filter((e) => e.status === tab);
@@ -85,7 +74,7 @@ export default function PortfolioPage() {
       </div>
 
       {/* Stats */}
-      {stats && (
+      {stats && entries.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <StatCard label="Invested" value={formatPrice(stats.totalInvested)} />
           <StatCard
@@ -162,7 +151,6 @@ export default function PortfolioPage() {
                   : 'border-gray-800'
               }`}
             >
-              {/* Top Row: Watch + P&L */}
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2">
@@ -185,7 +173,6 @@ export default function PortfolioPage() {
                   )}
                 </div>
 
-                {/* P&L Display */}
                 <div className="text-right">
                   {entry.status === 'sold' && entry.profit !== null ? (
                     <>
@@ -211,7 +198,6 @@ export default function PortfolioPage() {
                 </div>
               </div>
 
-              {/* Price Breakdown */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-3 border-t border-gray-800/50">
                 <div>
                   <div className="text-[10px] text-gray-500 uppercase">Bought</div>
@@ -262,7 +248,6 @@ export default function PortfolioPage() {
                 <div className="text-xs text-gray-500 mt-2 italic">{entry.notes}</div>
               )}
 
-              {/* Actions */}
               <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-800/50">
                 <div className="flex items-center gap-2">
                   {entry.status === 'holding' && (
@@ -297,7 +282,6 @@ export default function PortfolioPage() {
         </div>
       )}
 
-      {/* Sell Modal */}
       {sellModal && (
         <SellModal
           entry={sellModal}
@@ -324,7 +308,7 @@ function SellModal({
   onClose,
   onSold,
 }: {
-  entry: PortfolioEntry;
+  entry: EnrichedEntry;
   onClose: () => void;
   onSold: () => void;
 }) {
@@ -332,33 +316,21 @@ function SellModal({
   const [soldSource, setSoldSource] = useState('');
   const [soldDate, setSoldDate] = useState(new Date().toISOString().split('T')[0]);
   const [fees, setFees] = useState(entry.fees.toString());
-  const [submitting, setSubmitting] = useState(false);
 
   const previewProfit = soldPrice
     ? Number(soldPrice) - entry.purchasePrice - (Number(fees) || 0)
     : null;
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!soldPrice) return;
-    setSubmitting(true);
-    try {
-      await fetch('/api/portfolio', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'sell',
-          id: entry.id,
-          soldPrice: Number(soldPrice),
-          soldDate: new Date(soldDate).toISOString(),
-          soldSource,
-          fees: Number(fees) || 0,
-        }),
-      });
-      onSold();
-    } finally {
-      setSubmitting(false);
-    }
+    markSold(entry.id, {
+      soldPrice: Number(soldPrice),
+      soldDate: new Date(soldDate).toISOString(),
+      soldSource,
+      fees: Number(fees) || 0,
+    });
+    onSold();
   }
 
   return (
@@ -424,7 +396,6 @@ function SellModal({
             </div>
           </div>
 
-          {/* Profit Preview */}
           {previewProfit !== null && (
             <div className={`text-center py-3 rounded-lg border ${
               previewProfit >= 0
@@ -444,10 +415,9 @@ function SellModal({
           <div className="flex gap-3 pt-2">
             <button
               type="submit"
-              disabled={submitting || !soldPrice}
-              className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+              disabled={!soldPrice}
+              className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-medium py-2.5 rounded-lg transition"
             >
-              {submitting ? <SpinnerIcon className="w-4 h-4" /> : null}
               Confirm Sale
             </button>
             <button

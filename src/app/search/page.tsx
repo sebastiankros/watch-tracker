@@ -23,7 +23,9 @@ interface SearchResult {
   scrapedAt: string;
   searchUrls: {
     chrono24: string;
+    ebay: string;
     watchfinder: string;
+    jomashop: string;
   };
 }
 

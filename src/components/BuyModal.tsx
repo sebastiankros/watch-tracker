@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SpinnerIcon } from './Icons';
+import { addEntry } from '@/lib/portfolio';
 
 interface BuyModalProps {
   brand: string;
@@ -41,30 +42,26 @@ export default function BuyModal({
     setSubmitting(true);
 
     try {
-      const res = await fetch('/api/portfolio', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          watchId,
-          brand,
-          model,
-          reference,
-          purchasePrice: Number(price),
-          purchaseDate: new Date(date).toISOString(),
-          purchaseSource: source,
-          purchaseUrl: url || null,
-          fees: fees ? Number(fees) : 0,
-          notes,
-        }),
+      addEntry({
+        watchId,
+        brand,
+        model,
+        reference,
+        purchasePrice: Number(price),
+        purchaseDate: new Date(date).toISOString(),
+        purchaseSource: source,
+        purchaseUrl: url || undefined,
+        fees: fees ? Number(fees) : 0,
+        notes,
       });
 
-      if (res.ok) {
-        setSuccess(true);
-        setTimeout(() => {
-          onClose();
-          router.push('/portfolio');
-        }, 1000);
-      }
+      setSuccess(true);
+      setTimeout(() => {
+        onClose();
+        router.push('/portfolio');
+      }, 1000);
+    } catch {
+      // localStorage write failed
     } finally {
       setSubmitting(false);
     }
