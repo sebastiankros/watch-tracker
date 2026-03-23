@@ -255,10 +255,9 @@ async function scrapeAll(): Promise<CachedWatch[]> {
   return results;
 }
 
-// Scrape 3 watches in parallel per request.
-// Each watch hits 4 sources in parallel internally but the proxy failover
-// means only ~2 concurrent API calls per watch. 3 watches = ~6 calls
-// which both providers handle fine. Wall time ≈ 30s (one scrape).
+// Scrape 3 watches in parallel. Each watch races ScraperAPI vs ScrapingBee
+// (2 concurrent calls per watch), so 3 watches = 6 calls total.
+// Wall time ≈ 20-30s, well within Vercel's 60s timeout.
 const MAX_SCRAPE_PER_REQUEST = 3;
 
 // Get all watches, using cache when fresh

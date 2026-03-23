@@ -28,7 +28,7 @@ let preferredProvider: 'scraperapi' | 'scrapingbee' = 'scraperapi';
 /**
  * Fetch via ScraperAPI
  */
-function fetchViaScraperAPI(targetUrl: string, render: boolean): Promise<string> {
+function fetchViaScraperAPI(targetUrl: string, render: boolean, timeoutMs = 40000): Promise<string> {
   if (!SCRAPER_API_KEY) return Promise.reject(new Error('No SCRAPER_API_KEY'));
   const params = new URLSearchParams({
     api_key: SCRAPER_API_KEY,
@@ -38,7 +38,7 @@ function fetchViaScraperAPI(targetUrl: string, render: boolean): Promise<string>
   const proxyUrl = `http://api.scraperapi.com?${params.toString()}`;
 
   return new Promise((resolve, reject) => {
-    const req = http.get(proxyUrl, { timeout: 55000 }, (res) => {
+    const req = http.get(proxyUrl, { timeout: timeoutMs }, (res) => {
       let data = '';
       res.on('data', (c: string) => (data += c));
       res.on('end', () => {
@@ -56,7 +56,7 @@ function fetchViaScraperAPI(targetUrl: string, render: boolean): Promise<string>
 /**
  * Fetch via ScrapingBee
  */
-function fetchViaScrapingBee(targetUrl: string, render: boolean): Promise<string> {
+function fetchViaScrapingBee(targetUrl: string, render: boolean, timeoutMs = 40000): Promise<string> {
   if (!SCRAPINGBEE_API_KEY) return Promise.reject(new Error('No SCRAPINGBEE_API_KEY'));
   const params = new URLSearchParams({
     api_key: SCRAPINGBEE_API_KEY,
@@ -66,7 +66,7 @@ function fetchViaScrapingBee(targetUrl: string, render: boolean): Promise<string
   const proxyUrl = `https://app.scrapingbee.com/api/v1/?${params.toString()}`;
 
   return new Promise((resolve, reject) => {
-    const req = https.get(proxyUrl, { timeout: 55000 }, (res) => {
+    const req = https.get(proxyUrl, { timeout: timeoutMs }, (res) => {
       let data = '';
       res.on('data', (c: string) => (data += c));
       res.on('end', () => {
@@ -82,27 +82,18 @@ function fetchViaScrapingBee(targetUrl: string, render: boolean): Promise<string
 }
 
 /**
- * Fetch via proxy with automatic failover between providers
+ * Race both providers in parallel — first successful response wins.
+ * This avoids the 55s sequential failover that was blowing Vercel's 60s timeout.
  */
 async function fetchViaProxy(targetUrl: string, render = true): Promise<string> {
-  const providers = preferredProvider === 'scraperapi'
-    ? [fetchViaScraperAPI, fetchViaScrapingBee]
-    : [fetchViaScrapingBee, fetchViaScraperAPI];
+  const candidates: Promise<string>[] = [];
+  if (SCRAPER_API_KEY) candidates.push(fetchViaScraperAPI(targetUrl, render));
+  if (SCRAPINGBEE_API_KEY) candidates.push(fetchViaScrapingBee(targetUrl, render));
 
-  for (let i = 0; i < providers.length; i++) {
-    try {
-      const result = await providers[i](targetUrl, render);
-      return result;
-    } catch (err) {
-      // If primary fails, switch preferred provider for future calls
-      if (i === 0) {
-        preferredProvider = preferredProvider === 'scraperapi' ? 'scrapingbee' : 'scraperapi';
-      }
-      // If both fail, throw the last error
-      if (i === providers.length - 1) throw err;
-    }
-  }
-  throw new Error('All scraping providers failed');
+  if (candidates.length === 0) throw new Error('No scraping API keys configured');
+
+  // Promise.any resolves with the first fulfilled promise
+  return Promise.any(candidates);
 }
 
 /**
@@ -436,17 +427,16 @@ export async function scrapeJomashop(query: string, maxPrice = 50000): Promise<S
 export async function scrapeAllMarketplaces(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   if (!SCRAPER_API_KEY && !SCRAPINGBEE_API_KEY) return [];
 
-  // All 4 sources in parallel — failover between ScraperAPI and ScrapingBee
-  const results = await Promise.allSettled([
-    scrapeChrono24(query, maxPrice),
-    scrapeEbay(query, maxPrice),
-    scrapeWatchfinder(query, maxPrice),
-    scrapeJomashop(query, maxPrice),
-  ]);
+  // Chrono24 is the primary source (60+ listings per search).
+  // Only add eBay if Chrono24 returns few results, to save API credits.
+  const c24 = await scrapeChrono24(query, maxPrice).catch(() => [] as ScrapedListing[]);
 
-  const allListings = results.flatMap((r) =>
-    r.status === 'fulfilled' ? r.value : []
-  );
+  let secondary: ScrapedListing[] = [];
+  if (c24.length < 5) {
+    secondary = await scrapeEbay(query, maxPrice).catch(() => [] as ScrapedListing[]);
+  }
+
+  const allListings = [...c24, ...secondary];
 
   // Deduplicate by cleaned URL
   const seen = new Set<string>();
