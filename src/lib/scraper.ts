@@ -249,18 +249,14 @@ export async function scrapeAllMarketplaces(query: string): Promise<ScrapedListi
   return combined;
 }
 
-// Backward compat alias
-export const scrapeAllEbay = scrapeAllMarketplaces;
-
 /**
  * Generate marketplace search URLs for manual browsing
  */
 export function getMarketplaceSearchUrls(query: string) {
   const encoded = encodeURIComponent(query);
   return {
-    chrono24: `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true`,
-    watchfinder: `https://www.watchfinder.com/search?q=${encoded}`,
-    ebay: `https://www.ebay.com/sch/i.html?_nkw=${encoded}&_sacat=31387&LH_BIN=1`,
+    chrono24: `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true&usedWhere=us`,
+    watchfinder: `https://www.watchfinder.com/search?q=${encoded}&currency=USD`,
   };
 }
 
@@ -300,14 +296,6 @@ export function calculateMarketStats(listings: ScrapedListing[], minPrice = 500,
     highPrice: validPrices[validPrices.length - 1],
     sampleSize: validPrices.length,
   };
-}
-
-/**
- * Scrape eBay sold listings for additional market price data (no render needed)
- */
-export async function scrapeEbaySold(_query: string): Promise<ScrapedListing[]> {
-  // eBay search doesn't include prices in HTML — disabled
-  return [];
 }
 
 /**

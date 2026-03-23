@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { SearchIcon, SpinnerIcon, ExternalLinkIcon, TrendUpIcon, TrendDownIcon, TagIcon } from '@/components/Icons';
+import { SearchIcon, SpinnerIcon, ExternalLinkIcon, TrendUpIcon, TrendDownIcon } from '@/components/Icons';
 import Breadcrumbs from '@/components/Breadcrumbs';
 
 interface Listing {
@@ -23,10 +23,7 @@ interface SearchResult {
   scrapedAt: string;
   searchUrls: {
     chrono24: string;
-    ebay: string;
-    ebaySold: string;
-    watchRecon: string;
-    reddit: string;
+    watchfinder: string;
   };
 }
 
@@ -203,10 +200,7 @@ export default function SearchPage() {
               {Object.entries(results.searchUrls).map(([key, url]) => {
                 const labels: Record<string, string> = {
                   chrono24: 'Chrono24',
-                  ebay: 'eBay Active',
-                  ebaySold: 'eBay Sold',
-                  watchRecon: 'WatchRecon',
-                  reddit: 'r/Watchexchange',
+                  watchfinder: 'Watchfinder',
                 };
                 return (
                   <a

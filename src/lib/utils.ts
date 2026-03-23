@@ -48,3 +48,49 @@ export function timeAgo(date: Date | string): string {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return `${Math.floor(seconds / 86400)}d ago`;
 }
+
+export function badgeLabel(badge: string | null): string {
+  switch (badge) {
+    case 'hot': return 'HOT DEAL';
+    case 'great': return 'GREAT';
+    case 'best-value': return 'BEST VALUE';
+    case 'good': return 'GOOD';
+    default: return '';
+  }
+}
+
+export function badgeStyle(badge: string | null): string {
+  switch (badge) {
+    case 'hot': return 'bg-red-500/15 text-red-400 border-red-500/30';
+    case 'great': return 'bg-green-500/15 text-green-400 border-green-500/30';
+    case 'best-value': return 'bg-purple-500/15 text-purple-400 border-purple-500/30';
+    case 'good': return 'bg-blue-500/15 text-blue-400 border-blue-500/30';
+    default: return '';
+  }
+}
+
+export function scoreColor(score: number): string {
+  if (score >= 75) return 'text-green-400';
+  if (score >= 50) return 'text-yellow-400';
+  if (score >= 25) return 'text-orange-400';
+  return 'text-gray-400';
+}
+
+export function formatDealForSharing(deal: {
+  brand: string;
+  model: string;
+  listingPrice: number;
+  marketPrice: number;
+  discount: number;
+  savings: number;
+  source: string;
+  url: string;
+}): string {
+  return [
+    `${deal.brand} ${deal.model}`,
+    `${formatPrice(deal.listingPrice)} (${formatPrice(deal.savings)} below market)`,
+    `Market: ${formatPrice(deal.marketPrice)} | -${deal.discount}%`,
+    `Source: ${deal.source}`,
+    deal.url,
+  ].join('\n');
+}

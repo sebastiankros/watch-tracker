@@ -316,6 +316,33 @@ export async function getWatch(id: string) {
   };
 }
 
+/**
+ * Calculate a deal score (0-100) based on multiple weighted factors.
+ * Higher score = better deal overall.
+ */
+function calculateDealScore(discount: number, savings: number, confidence: number, listingsCount: number): number {
+  // Discount weight: 40% (normalized to 0-35% range)
+  const discountScore = Math.min(discount / 35, 1) * 40;
+  // Absolute savings weight: 25% (normalized to $0-$2000 range)
+  const savingsScore = Math.min(savings / 2000, 1) * 25;
+  // Confidence weight: 20% (how reliable is the market price)
+  const confidenceScore = confidence * 20;
+  // Market depth weight: 15% (more listings = more reliable pricing)
+  const depthScore = Math.min(listingsCount / 20, 1) * 15;
+  return Math.round(discountScore + savingsScore + confidenceScore + depthScore);
+}
+
+/**
+ * Assign a badge based on deal characteristics.
+ */
+function getDealBadge(score: number, discount: number, savings: number): string | null {
+  if (score >= 75 && discount >= 15) return 'hot';
+  if (score >= 60) return 'great';
+  if (savings >= 500 && discount >= 10) return 'best-value';
+  if (discount >= 10) return 'good';
+  return null;
+}
+
 export async function getDeals(opts?: {
   brand?: string;
   minDiscount?: number;
@@ -336,11 +363,15 @@ export async function getDeals(opts?: {
     marketPrice: number;
     discount: number;
     savings: number;
+    dealScore: number;
+    badge: string | null;
     source: string;
     url: string;
     seller: string | null;
     condition: string | null;
     listedDate: string;
+    listingsCount: number;
+    confidence: number;
   }[] = [];
 
   for (const cached of all) {
@@ -353,12 +384,13 @@ export async function getDeals(opts?: {
       const discount = ((w.marketPrice - l.price) / w.marketPrice) * 100;
       const savings = w.marketPrice - l.price;
 
-      // Skip suspiciously high discounts — likely not the actual watch
       if (discount > 35) continue;
-
       if (discount < minDiscount) continue;
       if (opts?.minPrice && l.price < opts.minPrice) continue;
       if (opts?.maxPrice && l.price > opts.maxPrice) continue;
+
+      const dealScore = calculateDealScore(discount, savings, w.confidence, cached.listings.length);
+      const badge = getDealBadge(dealScore, discount, savings);
 
       deals.push({
         id: l.id,
@@ -370,11 +402,15 @@ export async function getDeals(opts?: {
         marketPrice: w.marketPrice,
         discount: Math.round(discount * 10) / 10,
         savings,
+        dealScore,
+        badge,
         source: l.source,
         url: l.url,
         seller: l.seller,
         condition: l.condition,
         listedDate: l.listedDate,
+        listingsCount: cached.listings.length,
+        confidence: w.confidence,
       });
     }
   }
@@ -383,6 +419,9 @@ export async function getDeals(opts?: {
   switch (opts?.sort) {
     case 'savings':
       deals.sort((a, b) => b.savings - a.savings);
+      break;
+    case 'score':
+      deals.sort((a, b) => b.dealScore - a.dealScore);
       break;
     case 'price_asc':
       deals.sort((a, b) => a.listingPrice - b.listingPrice);
@@ -397,13 +436,18 @@ export async function getDeals(opts?: {
       deals.sort((a, b) => b.listedDate.localeCompare(a.listedDate));
       break;
     default:
-      deals.sort((a, b) => b.discount - a.discount);
+      // Default: sort by deal score (holistic ranking)
+      deals.sort((a, b) => b.dealScore - a.dealScore);
   }
 
   const dealsAbove5 = deals.filter((d) => d.discount >= 5);
   const avgDiscount = dealsAbove5.length > 0
     ? Math.round((dealsAbove5.reduce((s, d) => s + d.discount, 0) / dealsAbove5.length) * 10) / 10
     : 0;
+  const avgScore = deals.length > 0
+    ? Math.round(deals.reduce((s, d) => s + d.dealScore, 0) / deals.length)
+    : 0;
+  const hotDeals = deals.filter((d) => d.badge === 'hot').length;
 
   return {
     deals,
@@ -413,6 +457,8 @@ export async function getDeals(opts?: {
       dealsAbove10: deals.filter((d) => d.discount >= 10).length,
       dealsAbove15: deals.filter((d) => d.discount >= 15).length,
       avgDiscount,
+      avgScore,
+      hotDeals,
       bestDeal: deals[0] || null,
     },
   };

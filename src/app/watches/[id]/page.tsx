@@ -5,8 +5,10 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { formatPrice, discountColor, discountBg, timeAgo } from '@/lib/utils';
 import PriceChart from '@/components/PriceChart';
+import PriceDistribution from '@/components/PriceDistribution';
+import PriceBar from '@/components/PriceBar';
 import Breadcrumbs from '@/components/Breadcrumbs';
-import { ExternalLinkIcon, SpinnerIcon } from '@/components/Icons';
+import { ExternalLinkIcon, SpinnerIcon, CopyIcon } from '@/components/Icons';
 
 interface WatchDetail {
   id: string;
@@ -33,19 +35,12 @@ interface WatchDetail {
   }>;
 }
 
-interface SoldRecord {
-  id: string;
-  price: number;
-  source: string;
-  soldDate: string;
-  condition: string | null;
-}
-
 export default function WatchDetailPage() {
   const params = useParams();
   const [watch, setWatch] = useState<WatchDetail | null>(null);
-  const [soldRecords, setSoldRecords] = useState<SoldRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -53,11 +48,40 @@ export default function WatchDetailPage() {
       if (!res.ok) { setLoading(false); return; }
       const data = await res.json();
       setWatch(data.watch);
-      setSoldRecords(data.soldRecords || []);
       setLoading(false);
     }
     load();
   }, [params.id]);
+
+  // Load favorite state
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('watchlist');
+      if (saved) {
+        const list: string[] = JSON.parse(saved);
+        setIsFavorite(list.includes(params.id as string));
+      }
+    } catch {}
+  }, [params.id]);
+
+  function toggleFavorite() {
+    try {
+      const saved = localStorage.getItem('watchlist');
+      const list: string[] = saved ? JSON.parse(saved) : [];
+      const id = params.id as string;
+      const updated = list.includes(id)
+        ? list.filter((x) => x !== id)
+        : [...list, id];
+      localStorage.setItem('watchlist', JSON.stringify(updated));
+      setIsFavorite(!isFavorite);
+    } catch {}
+  }
+
+  function copyUrl(url: string) {
+    navigator.clipboard.writeText(url);
+    setCopiedUrl(url);
+    setTimeout(() => setCopiedUrl(null), 2000);
+  }
 
   if (loading) {
     return (
@@ -70,7 +94,8 @@ export default function WatchDetailPage() {
   if (!watch) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-400">Watch not found</p>
+        <p className="text-gray-400">Watch not found or still loading.</p>
+        <p className="text-sm text-gray-600 mt-1">Try refreshing from the dashboard to load market data.</p>
         <Link href="/market" className="text-blue-400 text-sm mt-2 inline-block">Back to Market</Link>
       </div>
     );
@@ -82,17 +107,11 @@ export default function WatchDetailPage() {
     source: h.source,
   }));
 
-  const sourceMap = new Map<string, number[]>();
-  watch.priceHistory.forEach((h) => {
-    if (!sourceMap.has(h.source)) sourceMap.set(h.source, []);
-    sourceMap.get(h.source)!.push(h.price);
-  });
-  const sources = Array.from(sourceMap.entries()).map(([source, prices]) => ({
-    source,
-    avg: Math.round(prices.reduce((a, b) => a + b, 0) / prices.length),
-    count: prices.length,
-    latest: prices[prices.length - 1],
-  }));
+  const listingPrices = watch.listings.map((l) => l.price).filter(Boolean);
+  const sortedListings = [...watch.listings].sort((a, b) => a.price - b.price);
+  const lowestPrice = sortedListings[0]?.price;
+  const highestPrice = sortedListings[sortedListings.length - 1]?.price;
+  const belowMarket = sortedListings.filter((l) => l.price < watch.marketPrice).length;
 
   return (
     <div className="space-y-6">
@@ -103,10 +122,24 @@ export default function WatchDetailPage() {
 
       {/* Header */}
       <div className="bg-[#111118] border border-gray-800 rounded-xl p-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white">{watch.brand} {watch.model}</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold text-white">{watch.brand} {watch.model}</h1>
+              <button
+                onClick={toggleFavorite}
+                className={`text-xl transition ${isFavorite ? 'text-yellow-400 hover:text-yellow-300' : 'text-gray-600 hover:text-yellow-400'}`}
+                title={isFavorite ? 'Remove from watchlist' : 'Add to watchlist'}
+              >
+                {isFavorite ? '\u2605' : '\u2606'}
+              </button>
+            </div>
             <p className="text-gray-500 text-sm mt-1">Ref. {watch.reference}</p>
+            <div className="flex gap-4 mt-3 flex-wrap">
+              <TrendPill label="7d" current={watch.marketPrice} previous={watch.price7dAgo} />
+              <TrendPill label="30d" current={watch.marketPrice} previous={watch.price30dAgo} />
+              <TrendPill label="90d" current={watch.marketPrice} previous={watch.price90dAgo} />
+            </div>
           </div>
           <div className="text-right">
             <div className="text-3xl font-bold text-white">{formatPrice(watch.marketPrice)}</div>
@@ -121,101 +154,100 @@ export default function WatchDetailPage() {
           </div>
         </div>
 
-        <div className="flex gap-4 mt-4 flex-wrap">
-          <TrendPill label="7d" current={watch.marketPrice} previous={watch.price7dAgo} />
-          <TrendPill label="30d" current={watch.marketPrice} previous={watch.price30dAgo} />
-          <TrendPill label="90d" current={watch.marketPrice} previous={watch.price90dAgo} />
+        {/* Quick Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t border-gray-800">
+          <div className="text-center">
+            <div className="text-xs text-gray-500">Listings</div>
+            <div className="text-lg font-bold text-white">{watch.listings.length}</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-gray-500">Below Market</div>
+            <div className="text-lg font-bold text-green-400">{belowMarket}</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-gray-500">Lowest</div>
+            <div className="text-lg font-bold text-green-400">{lowestPrice ? formatPrice(lowestPrice) : 'N/A'}</div>
+          </div>
+          <div className="text-center">
+            <div className="text-xs text-gray-500">Highest</div>
+            <div className="text-lg font-bold text-red-400">{highestPrice ? formatPrice(highestPrice) : 'N/A'}</div>
+          </div>
         </div>
       </div>
 
-      {/* Price History Chart */}
-      <div className="bg-[#111118] border border-gray-800 rounded-xl p-6">
-        <h2 className="text-lg font-semibold text-white mb-4">Price History</h2>
-        <PriceChart data={chartData} />
+      {/* Price Distribution + History */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-[#111118] border border-gray-800 rounded-xl p-6">
+          <h2 className="text-lg font-semibold text-white mb-4">Price Distribution</h2>
+          <PriceDistribution prices={listingPrices} marketPrice={watch.marketPrice} />
+        </div>
+        <div className="bg-[#111118] border border-gray-800 rounded-xl p-6">
+          <h2 className="text-lg font-semibold text-white mb-4">Price History</h2>
+          <PriceChart data={chartData} />
+        </div>
       </div>
 
-      {/* Two Column: Listings + Sold Records */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Active Listings */}
-        <div className="bg-[#111118] border border-gray-800 rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-800">
-            <h2 className="text-lg font-semibold text-white">Active Listings ({watch.listings.length})</h2>
-          </div>
-          {watch.listings.length === 0 ? (
-            <div className="p-6 text-center text-gray-500 text-sm">No active listings found</div>
-          ) : (
-            <div className="divide-y divide-gray-800/50">
-              {watch.listings.map((listing) => {
-                const discount = ((watch.marketPrice - listing.price) / watch.marketPrice) * 100;
-                const isDeal = discount >= 5;
-                return (
-                  <div key={listing.id} className="px-5 py-3 deal-row">
-                    <div className="flex items-center justify-between">
-                      <div className="text-white font-semibold text-sm">{formatPrice(listing.price)}</div>
-                      {isDeal && (
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded border ${discountBg(discount)} ${discountColor(discount)}`}>
-                          -{discount.toFixed(1)}%
-                        </span>
-                      )}
+      {/* Active Listings */}
+      <div className="bg-[#111118] border border-gray-800 rounded-xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">Active Listings ({watch.listings.length})</h2>
+          <div className="text-xs text-gray-500">Sorted by price (low to high)</div>
+        </div>
+        {sortedListings.length === 0 ? (
+          <div className="p-6 text-center text-gray-500 text-sm">No active listings found</div>
+        ) : (
+          <div className="divide-y divide-gray-800/50">
+            {sortedListings.map((listing) => {
+              const discount = ((watch.marketPrice - listing.price) / watch.marketPrice) * 100;
+              const isDeal = discount >= 5;
+              const isGreatDeal = discount >= 10;
+              return (
+                <div key={listing.id} className={`px-5 py-3 deal-row ${isGreatDeal ? 'deal-hot' : ''}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <div className="text-white font-semibold text-sm">{formatPrice(listing.price)}</div>
+                        {isDeal && (
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded border ${discountBg(discount)} ${discountColor(discount)}`}>
+                            -{discount.toFixed(1)}%
+                          </span>
+                        )}
+                        {discount > 0 && (
+                          <span className="text-xs text-green-400/70">Save {formatPrice(watch.marketPrice - listing.price)}</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5 truncate max-w-md">
+                        {listing.title}
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between mt-1 text-xs text-gray-500">
-                      <span>{listing.source} &middot; {listing.condition || 'N/A'} &middot; {listing.seller || 'N/A'}</span>
-                      <a href={listing.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 inline-flex items-center gap-1">
-                        View <ExternalLinkIcon className="w-3 h-3" />
+                    <div className="w-32 hidden md:block">
+                      <PriceBar listingPrice={listing.price} marketPrice={watch.marketPrice} />
+                    </div>
+                    <div className="text-xs text-gray-500 hidden md:block w-20 text-center">
+                      {listing.source}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => copyUrl(listing.url)}
+                        className="text-gray-500 hover:text-white p-1"
+                        title="Copy link"
+                      >
+                        {copiedUrl === listing.url ? (
+                          <span className="text-green-400 text-[10px]">Copied</span>
+                        ) : (
+                          <CopyIcon className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      <a href={listing.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 p-1">
+                        <ExternalLinkIcon className="w-3.5 h-3.5" />
                       </a>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Recent Sold Prices */}
-        <div className="bg-[#111118] border border-gray-800 rounded-xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-800">
-            <h2 className="text-lg font-semibold text-white">Recent Sold Prices</h2>
-          </div>
-          {soldRecords.length === 0 ? (
-            <div className="p-6 text-center text-gray-500 text-sm">No sold records found</div>
-          ) : (
-            <div className="divide-y divide-gray-800/50">
-              {soldRecords.map((record) => (
-                <div key={record.id} className="px-5 py-3 flex items-center justify-between deal-row">
-                  <div>
-                    <div className="text-white font-semibold text-sm">{formatPrice(record.price)}</div>
-                    <div className="text-xs text-gray-500">{record.condition || 'N/A'}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm text-gray-400">{record.source}</div>
-                    <div className="text-xs text-gray-600">{new Date(record.soldDate).toLocaleDateString()}</div>
-                  </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Price Sources Breakdown */}
-      <div className="bg-[#111118] border border-gray-800 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-800">
-          <h2 className="text-lg font-semibold text-white">Price Sources Breakdown</h2>
-        </div>
-        <div className="divide-y divide-gray-800/50">
-          {sources.map((s) => (
-            <div key={s.source} className="px-5 py-3 flex items-center justify-between deal-row">
-              <div>
-                <div className="text-white text-sm font-medium">{s.source}</div>
-                <div className="text-xs text-gray-500">{s.count} data points</div>
-              </div>
-              <div className="text-right">
-                <div className="text-white font-semibold text-sm">{formatPrice(s.latest)}</div>
-                <div className="text-xs text-gray-500">avg {formatPrice(s.avg)}</div>
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -225,7 +257,7 @@ function TrendPill({ label, current, previous }: { label: string; current: numbe
   if (!previous) return null;
   const pct = ((current - previous) / previous) * 100;
   const isUp = pct > 0;
-  const color = isUp ? 'text-green-400 bg-green-500/10 border-green-500/20' : 'text-red-400 bg-red-500/10 border-red-500/20';
+  const color = isUp ? 'text-green-400 bg-green-500/10 border-green-500/20' : pct < 0 ? 'text-red-400 bg-red-500/10 border-red-500/20' : 'text-gray-400 bg-gray-500/10 border-gray-500/20';
 
   return (
     <div className={`inline-flex items-center gap-1 px-3 py-1 rounded-full border text-xs font-medium ${color}`}>
