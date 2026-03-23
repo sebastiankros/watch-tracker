@@ -50,7 +50,7 @@ export default function DealsPage() {
   const [brand, setBrand] = useState('');
   const [minDiscount, setMinDiscount] = useState('3');
   const [minPrice, setMinPrice] = useState('500');
-  const [maxPrice, setMaxPrice] = useState('7000');
+  const [maxPrice, setMaxPrice] = useState('50000');
   const [sort, setSort] = useState('score');
 
   const loadDeals = useCallback(async () => {
@@ -162,11 +162,12 @@ export default function DealsPage() {
               onChange={(e) => setMaxPrice(e.target.value)}
               className="w-full bg-[#0a0a0f] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
             >
-              <option value="1000">Up to $1,000</option>
               <option value="2000">Up to $2,000</option>
-              <option value="3000">Up to $3,000</option>
               <option value="5000">Up to $5,000</option>
-              <option value="7000">Up to $7,000</option>
+              <option value="10000">Up to $10,000</option>
+              <option value="25000">Up to $25,000</option>
+              <option value="50000">Up to $50,000</option>
+              <option value="100000">No limit</option>
             </select>
           </div>
           <div>

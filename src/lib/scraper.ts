@@ -93,10 +93,10 @@ interface C24JsonLd {
   '@graph'?: C24GraphEntry[];
 }
 
-export async function scrapeChrono24(query: string): Promise<ScrapedListing[]> {
+export async function scrapeChrono24(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
   // usedWhere=us filters to dealers that ship to the USA
-  const targetUrl = `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true&usedWhere=us&priceTo=7000&priceFrom=500`;
+  const targetUrl = `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true&usedWhere=us&priceTo=${maxPrice}&priceFrom=500`;
   const html = await fetchViaProxy(targetUrl, true);
 
   const listings: ScrapedListing[] = [];
@@ -127,7 +127,7 @@ export async function scrapeChrono24(query: string): Promise<ScrapedListing[]> {
         if (id) seen.add(id);
 
         if (!title || isJunkListing(title)) continue;
-        if (price < 500 || price > 7000) continue;
+        if (price < 500 || price > maxPrice) continue;
 
         // Validate title relevance
         const queryWords = query.toLowerCase().split(/\s+/);
@@ -156,7 +156,7 @@ export async function scrapeChrono24(query: string): Promise<ScrapedListing[]> {
       if (id && seen.has(id)) continue;
       if (id) seen.add(id);
 
-      if (!title || isJunkListing(title) || price < 500 || price > 7000) continue;
+      if (!title || isJunkListing(title) || price < 500 || price > maxPrice) continue;
 
       listings.push({ title, price, url, source: 'Chrono24', postedAgo: '' });
     }
@@ -167,7 +167,7 @@ export async function scrapeChrono24(query: string): Promise<ScrapedListing[]> {
 
 // ===== Watchfinder scraper =====
 
-export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]> {
+export async function scrapeWatchfinder(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
   // Use .com with USD currency to ensure US-shippable results
   const targetUrl = `https://www.watchfinder.com/search?q=${encoded}&currency=USD`;
@@ -196,7 +196,7 @@ export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]
     const price = parseInt(priceMatch[1].replace(/,/g, ''), 10);
 
     if (!title || isJunkListing(title)) continue;
-    if (price < 500 || price > 7000) continue;
+    if (price < 500 || price > maxPrice) continue;
 
     const queryWords = query.toLowerCase().split(/\s+/);
     const titleLower = title.toLowerCase();
@@ -219,10 +219,10 @@ export async function scrapeWatchfinder(query: string): Promise<ScrapedListing[]
 
 // ===== eBay scraper =====
 
-export async function scrapeEbay(query: string): Promise<ScrapedListing[]> {
+export async function scrapeEbay(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
   // Category 31387 = Wristwatches, LH_ItemCondition=3000 = Pre-owned, LH_PrefLoc=1 = US Only
-  const targetUrl = `https://www.ebay.com/sch/31387/i.html?_nkw=${encoded}&_sop=12&LH_ItemCondition=3000&LH_PrefLoc=1&_udhi=7000&_udlo=500`;
+  const targetUrl = `https://www.ebay.com/sch/31387/i.html?_nkw=${encoded}&_sop=12&LH_ItemCondition=3000&LH_PrefLoc=1&_udhi=${maxPrice}&_udlo=500`;
   const html = await fetchViaProxy(targetUrl, true);
 
   const listings: ScrapedListing[] = [];
@@ -259,7 +259,7 @@ export async function scrapeEbay(query: string): Promise<ScrapedListing[]> {
     seen.add(itemId);
 
     if (isJunkListing(title)) continue;
-    if (finalPrice < 500 || finalPrice > 7000) continue;
+    if (finalPrice < 500 || finalPrice > maxPrice) continue;
 
     // Relevance check
     const queryWords = query.toLowerCase().split(/\s+/);
@@ -281,7 +281,7 @@ export async function scrapeEbay(query: string): Promise<ScrapedListing[]> {
 
 // ===== Jomashop scraper =====
 
-export async function scrapeJomashop(query: string): Promise<ScrapedListing[]> {
+export async function scrapeJomashop(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
   const targetUrl = `https://www.jomashop.com/catalogsearch/result?q=${encoded}`;
   const html = await fetchViaProxy(targetUrl, true);
@@ -312,7 +312,7 @@ export async function scrapeJomashop(query: string): Promise<ScrapedListing[]> {
         seen.add(key);
 
         if (isJunkListing(title)) continue;
-        if (finalPrice < 500 || finalPrice > 7000) continue;
+        if (finalPrice < 500 || finalPrice > maxPrice) continue;
 
         const queryWords = query.toLowerCase().split(/\s+/);
         const titleLower = title.toLowerCase();
@@ -353,7 +353,7 @@ export async function scrapeJomashop(query: string): Promise<ScrapedListing[]> {
       seen.add(key);
 
       if (isJunkListing(title)) continue;
-      if (price < 500 || price > 7000) continue;
+      if (price < 500 || price > maxPrice) continue;
 
       const queryWords = query.toLowerCase().split(/\s+/);
       const titleLower = title.toLowerCase();
@@ -379,17 +379,17 @@ export async function scrapeJomashop(query: string): Promise<ScrapedListing[]> {
  * Scrape all marketplaces: Chrono24 (primary) + eBay + Watchfinder + Jomashop.
  * Chrono24 runs first. Secondary sources run in parallel if needed.
  */
-export async function scrapeAllMarketplaces(query: string): Promise<ScrapedListing[]> {
+export async function scrapeAllMarketplaces(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   if (!SCRAPER_API_KEY) return [];
 
   // Chrono24 is primary — always fetch
-  const c24 = await scrapeChrono24(query).catch(() => [] as ScrapedListing[]);
+  const c24 = await scrapeChrono24(query, maxPrice).catch(() => [] as ScrapedListing[]);
 
   // Fetch secondary sources in parallel
   const secondaryResults = await Promise.allSettled([
-    scrapeEbay(query),
-    scrapeWatchfinder(query),
-    scrapeJomashop(query),
+    scrapeEbay(query, maxPrice),
+    scrapeWatchfinder(query, maxPrice),
+    scrapeJomashop(query, maxPrice),
   ]);
 
   const secondary = secondaryResults.flatMap((r) =>
@@ -463,11 +463,11 @@ export function calculateMarketStats(listings: ScrapedListing[], minPrice = 500,
 /**
  * Full scrape: Chrono24 + Watchfinder for listings and market pricing
  */
-export async function scrapeWatch(query: string): Promise<ScrapedMarketData> {
-  const activeListings = await scrapeAllMarketplaces(query).catch(() => [] as ScrapedListing[]);
+export async function scrapeWatch(query: string, maxPrice = 50000): Promise<ScrapedMarketData> {
+  const activeListings = await scrapeAllMarketplaces(query, maxPrice).catch(() => [] as ScrapedListing[]);
 
-  // Market price from combined Chrono24 + Watchfinder data
-  const stats = calculateMarketStats(activeListings, 500, 7000);
+  // Market price from combined data
+  const stats = calculateMarketStats(activeListings, 500, maxPrice);
 
   return {
     listings: activeListings,

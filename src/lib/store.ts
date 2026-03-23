@@ -84,6 +84,7 @@ export interface AlertEntry {
 export interface SettingsEntry {
   refreshInterval: number;
   minDiscountPct: number;
+  maxPrice: number;
   preferredBrands: string;
   alertEmail: string;
 }
@@ -122,6 +123,7 @@ let _portfolio: PortfolioEntry[] = [];
 let _settings: SettingsEntry = {
   refreshInterval: 60,
   minDiscountPct: 5,
+  maxPrice: 50000,
   preferredBrands: '',
   alertEmail: '',
 };
@@ -146,8 +148,8 @@ async function scrapeAndCache(tracked: typeof TRACKED_WATCHES[number]): Promise<
 
   try {
     // Scrape Chrono24 + Watchfinder (verified accurate prices)
-    const activeListings = await scrapeAllMarketplaces(tracked.query).catch(() => [] as ScrapedListing[]);
-    let inRange = activeListings.filter((l) => l.price && l.price >= 500 && l.price <= 7000);
+    const activeListings = await scrapeAllMarketplaces(tracked.query, _settings.maxPrice).catch(() => [] as ScrapedListing[]);
+    let inRange = activeListings.filter((l) => l.price && l.price >= 500 && l.price <= _settings.maxPrice);
 
     // Remove outliers
     const prices = inRange.map((l) => l.price!).sort((a, b) => a - b);
@@ -157,7 +159,7 @@ async function scrapeAndCache(tracked: typeof TRACKED_WATCHES[number]): Promise<
       const ceiling = median * 2.0;
       inRange = inRange.filter((l) => l.price! >= floor && l.price! <= ceiling);
     }
-    const stats = calculateMarketStats(activeListings, 500, 7000);
+    const stats = calculateMarketStats(activeListings, 500, _settings.maxPrice);
 
     if (!stats.marketPrice || inRange.length === 0) {
       // Return existing cache even if stale, or empty
@@ -297,7 +299,7 @@ export async function getWatches(opts?: {
     );
   }
 
-  watches = watches.filter((w) => w.marketPrice >= 500 && w.marketPrice <= 7000);
+  watches = watches.filter((w) => w.marketPrice >= 500 && w.marketPrice <= _settings.maxPrice);
   watches.sort((a, b) => a.brand.localeCompare(b.brand) || a.model.localeCompare(b.model));
 
   const brands = [...new Set(all.map((c) => c.watch.brand))].sort();
@@ -396,7 +398,7 @@ export async function getDeals(opts?: {
 
   for (const cached of all) {
     const w = cached.watch;
-    if (w.marketPrice < 500 || w.marketPrice > 7000) continue;
+    if (w.marketPrice < 500 || w.marketPrice > _settings.maxPrice) continue;
     if (opts?.brand && w.brand !== opts.brand) continue;
 
     for (const l of cached.listings) {
@@ -495,7 +497,7 @@ export function searchWatches(q: string) {
       w.model.toLowerCase().includes(lower) ||
       w.reference.toLowerCase().includes(lower)
     ) {
-      if (w.marketPrice >= 500 && w.marketPrice <= 7000) {
+      if (w.marketPrice >= 500 && w.marketPrice <= _settings.maxPrice) {
         results.push(w);
       }
     }
@@ -562,6 +564,7 @@ export function getSettings(): SettingsEntry {
 export function updateSettings(data: Partial<SettingsEntry>) {
   if (data.refreshInterval !== undefined) _settings.refreshInterval = data.refreshInterval;
   if (data.minDiscountPct !== undefined) _settings.minDiscountPct = data.minDiscountPct;
+  if (data.maxPrice !== undefined) _settings.maxPrice = data.maxPrice;
   if (data.preferredBrands !== undefined) _settings.preferredBrands = data.preferredBrands;
   if (data.alertEmail !== undefined) _settings.alertEmail = data.alertEmail;
   return { ..._settings };

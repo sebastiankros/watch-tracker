@@ -7,6 +7,7 @@ import Breadcrumbs from '@/components/Breadcrumbs';
 interface Settings {
   refreshInterval: number;
   minDiscountPct: number;
+  maxPrice: number;
   preferredBrands: string;
   alertEmail: string;
 }
@@ -117,6 +118,23 @@ export default function SettingsPage() {
               <option value={15}>15%+</option>
               <option value={20}>20%+</option>
             </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Maximum Watch Price</label>
+            <select
+              value={settings.maxPrice}
+              onChange={(e) => setSettings({ ...settings, maxPrice: Number(e.target.value) })}
+              className="w-full bg-[#0a0a0f] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
+            >
+              <option value={5000}>$5,000</option>
+              <option value={7000}>$7,000</option>
+              <option value={10000}>$10,000</option>
+              <option value={15000}>$15,000</option>
+              <option value={25000}>$25,000</option>
+              <option value={50000}>$50,000</option>
+              <option value={100000}>$100,000</option>
+            </select>
+            <p className="text-xs text-gray-600 mt-1">Scrapers and filters will use this as the upper bound</p>
           </div>
         </div>
 

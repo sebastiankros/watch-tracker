@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { scrapeAllMarketplaces, calculateMarketStats } from '@/lib/scraper';
+import { getSettings } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -13,9 +14,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const listings = await scrapeAllMarketplaces(q);
-    const filtered = listings.filter((l) => l.price && l.price >= 500 && l.price <= 7000);
-    const stats = calculateMarketStats(filtered, 500, 7000);
+    const { maxPrice } = getSettings();
+    const listings = await scrapeAllMarketplaces(q, maxPrice);
+    const filtered = listings.filter((l) => l.price && l.price >= 500 && l.price <= maxPrice);
+    const stats = calculateMarketStats(filtered, 500, maxPrice);
 
     return NextResponse.json({
       results: filtered.slice(0, 20).map((l) => ({

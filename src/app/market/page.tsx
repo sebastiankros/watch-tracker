@@ -51,7 +51,6 @@ export default function MarketPage() {
       if (max) params.set('maxPrice', max);
     } else {
       params.set('minPrice', '500');
-      params.set('maxPrice', '7000');
     }
 
     const res = await fetch(`/api/watches?${params}`);
@@ -134,11 +133,12 @@ export default function MarketPage() {
             onChange={(e) => setPriceRange(e.target.value)}
             className="bg-[#0a0a0f] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
           >
-            <option value="">$500 - $7K</option>
-            <option value="500-1000">$500 - $1K</option>
-            <option value="1000-2000">$1K - $2K</option>
-            <option value="2000-4000">$2K - $4K</option>
-            <option value="4000-7000">$4K - $7K</option>
+            <option value="">All Prices</option>
+            <option value="500-2000">$500 - $2K</option>
+            <option value="2000-5000">$2K - $5K</option>
+            <option value="5000-10000">$5K - $10K</option>
+            <option value="10000-25000">$10K - $25K</option>
+            <option value="25000-50000">$25K - $50K</option>
           </select>
           <button
             onClick={() => setShowFavOnly(!showFavOnly)}

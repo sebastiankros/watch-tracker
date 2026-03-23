@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { scrapeWatch, getMarketplaceSearchUrls } from '@/lib/scraper';
+import { getSettings } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -23,12 +24,12 @@ export async function GET(request: Request) {
   }
 
   try {
-    const marketData = await scrapeWatch(q);
+    const { maxPrice } = getSettings();
+    const marketData = await scrapeWatch(q, maxPrice);
     const searchUrls = getMarketplaceSearchUrls(q);
 
-    // Filter to $500-$7000 range
     const filteredListings = marketData.listings.filter(
-      (l) => l.price && l.price >= 500 && l.price <= 7000
+      (l) => l.price && l.price >= 500 && l.price <= maxPrice
     );
 
     const result = {

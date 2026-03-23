@@ -161,7 +161,7 @@ export const WATCH_DATABASE: WatchReference[] = [
 ];
 
 export const PRICE_MIN = 500;
-export const PRICE_MAX = 7000;
+export const PRICE_MAX = 50000;
 
 // Simulated listing sources
 const LISTING_SOURCES = ['Chrono24', 'eBay', 'WatchBox', 'Crown & Caliber', 'Hodinkee Shop', "Bob's Watches"];
