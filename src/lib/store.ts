@@ -255,9 +255,11 @@ async function scrapeAll(): Promise<CachedWatch[]> {
   return results;
 }
 
-// ScraperAPI free tier: 5 concurrent requests. Each watch uses up to 4 sources.
-// Scrape 1 watch at a time (4 concurrent API calls), queue up to 5 watches per page load.
-const MAX_SCRAPE_PER_REQUEST = 5;
+// Scrape 3 watches in parallel per request.
+// Each watch hits 4 sources in parallel internally but the proxy failover
+// means only ~2 concurrent API calls per watch. 3 watches = ~6 calls
+// which both providers handle fine. Wall time ≈ 30s (one scrape).
+const MAX_SCRAPE_PER_REQUEST = 3;
 
 // Get all watches, using cache when fresh
 async function getAllCached(): Promise<CachedWatch[]> {
@@ -277,21 +279,19 @@ async function getAllCached(): Promise<CachedWatch[]> {
     }
   }
 
-  // Scrape sequentially (each watch uses up to 4 parallel API calls internally)
+  // Scrape in parallel — wall time ≈ one scrape (~30s), fits in Vercel 60s timeout
   if (toScrape.length > 0) {
     const batch = toScrape.slice(0, MAX_SCRAPE_PER_REQUEST);
-    for (const tracked of batch) {
-      try {
-        const result = await scrapeAndCache(tracked);
-        // Replace the seed-price fallback with real data
-        const idx = results.findIndex((r) => r.watch.id === result.watch.id);
-        if (result.watch.marketPrice > 0) {
-          if (idx >= 0) results[idx] = result;
-          else results.push(result);
-        }
-      } catch {
-        // Keep the seed-price fallback
-      }
+    const scrapeResults = await Promise.allSettled(batch.map((t) => scrapeAndCache(t)));
+
+    for (const r of scrapeResults) {
+      if (r.status !== 'fulfilled') continue;
+      const result = r.value;
+      if (result.watch.marketPrice <= 0) continue;
+      // Replace the seed-price fallback with real scraped data
+      const idx = results.findIndex((existing) => existing.watch.id === result.watch.id);
+      if (idx >= 0) results[idx] = result;
+      else results.push(result);
     }
   }
 
@@ -532,13 +532,8 @@ export function searchWatches(q: string) {
 export async function refreshMarketData() {
   cache.clear();
   const batch = TRACKED_WATCHES.slice(0, MAX_SCRAPE_PER_REQUEST);
-  let scraped = 0;
-  for (const tracked of batch) {
-    try {
-      const result = await scrapeAndCache(tracked);
-      if (result.watch.marketPrice > 0) scraped++;
-    } catch { /* skip */ }
-  }
+  const results = await Promise.allSettled(batch.map((t) => scrapeAndCache(t)));
+  const scraped = results.filter((r) => r.status === 'fulfilled' && r.value.watch.marketPrice > 0).length;
   return {
     success: true,
     message: `Scraped ${scraped} watches. Others will load as you browse. (${TRACKED_WATCHES.length} total tracked)`,
