@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SettingsIcon, LogoutIcon, WatchIcon, SearchIcon } from './Icons';
+import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SettingsIcon, LogoutIcon, WatchIcon, SearchIcon, PortfolioIcon } from './Icons';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', Icon: DashboardIcon },
   { href: '/search', label: 'Search', Icon: SearchIcon, badge: 'LIVE' },
   { href: '/deals', label: 'Deals', Icon: DealsIcon },
   { href: '/market', label: 'Market Prices', Icon: MarketIcon },
+  { href: '/portfolio', label: 'Portfolio', Icon: PortfolioIcon, badge: 'NEW' },
   { href: '/alerts', label: 'Alerts', Icon: AlertIcon },
   { href: '/settings', label: 'Settings', Icon: SettingsIcon },
 ];
@@ -51,7 +52,9 @@ export default function Sidebar() {
               <item.Icon className="w-5 h-5" />
               {item.label}
               {item.badge && (
-                <span className="ml-auto bg-green-500/20 text-green-400 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                  item.badge === 'NEW' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'
+                }`}>
                   {item.badge}
                 </span>
               )}

@@ -8,7 +8,8 @@ import PriceChart from '@/components/PriceChart';
 import PriceDistribution from '@/components/PriceDistribution';
 import PriceBar from '@/components/PriceBar';
 import Breadcrumbs from '@/components/Breadcrumbs';
-import { ExternalLinkIcon, SpinnerIcon, CopyIcon } from '@/components/Icons';
+import BuyModal from '@/components/BuyModal';
+import { ExternalLinkIcon, SpinnerIcon, CopyIcon, PlusIcon } from '@/components/Icons';
 
 interface WatchDetail {
   id: string;
@@ -41,6 +42,8 @@ export default function WatchDetailPage() {
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const [showBuyModal, setShowBuyModal] = useState(false);
+  const [buyDefaults, setBuyDefaults] = useState<{ price?: number; source?: string; url?: string }>({});
 
   useEffect(() => {
     async function load() {
@@ -132,6 +135,12 @@ export default function WatchDetailPage() {
                 title={isFavorite ? 'Remove from watchlist' : 'Add to watchlist'}
               >
                 {isFavorite ? '\u2605' : '\u2606'}
+              </button>
+              <button
+                onClick={() => { setBuyDefaults({}); setShowBuyModal(true); }}
+                className="bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition flex items-center gap-1"
+              >
+                <PlusIcon className="w-3.5 h-3.5" /> I Bought This
               </button>
             </div>
             <p className="text-gray-500 text-sm mt-1">Ref. {watch.reference}</p>
@@ -228,6 +237,16 @@ export default function WatchDetailPage() {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <button
+                        onClick={() => {
+                          setBuyDefaults({ price: listing.price, source: listing.source, url: listing.url });
+                          setShowBuyModal(true);
+                        }}
+                        className="text-green-500 hover:text-green-400 text-[10px] font-bold px-1.5 py-0.5 border border-green-500/30 rounded hover:bg-green-500/10 transition"
+                        title="Mark as bought"
+                      >
+                        Bought
+                      </button>
+                      <button
                         onClick={() => copyUrl(listing.url)}
                         className="text-gray-500 hover:text-white p-1"
                         title="Copy link"
@@ -249,6 +268,20 @@ export default function WatchDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Buy Modal */}
+      {showBuyModal && watch && (
+        <BuyModal
+          brand={watch.brand}
+          model={watch.model}
+          reference={watch.reference}
+          watchId={watch.id}
+          defaultPrice={buyDefaults.price}
+          defaultSource={buyDefaults.source}
+          defaultUrl={buyDefaults.url}
+          onClose={() => setShowBuyModal(false)}
+        />
+      )}
     </div>
   );
 }

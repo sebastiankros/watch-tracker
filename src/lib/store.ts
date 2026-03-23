@@ -88,6 +88,25 @@ export interface SettingsEntry {
   alertEmail: string;
 }
 
+export interface PortfolioEntry {
+  id: string;
+  watchId: string | null;
+  brand: string;
+  model: string;
+  reference: string;
+  purchasePrice: number;
+  purchaseDate: string;
+  purchaseSource: string;
+  purchaseUrl: string | null;
+  soldPrice: number | null;
+  soldDate: string | null;
+  soldSource: string | null;
+  fees: number;
+  notes: string;
+  status: 'holding' | 'sold';
+  createdAt: string;
+}
+
 // ===== Cache =====
 
 interface CachedWatch {
@@ -99,6 +118,7 @@ interface CachedWatch {
 const cache = new Map<string, CachedWatch>();
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 let _alerts: AlertEntry[] = [];
+let _portfolio: PortfolioEntry[] = [];
 let _settings: SettingsEntry = {
   refreshInterval: 60,
   minDiscountPct: 5,
@@ -545,4 +565,149 @@ export function updateSettings(data: Partial<SettingsEntry>) {
   if (data.preferredBrands !== undefined) _settings.preferredBrands = data.preferredBrands;
   if (data.alertEmail !== undefined) _settings.alertEmail = data.alertEmail;
   return { ..._settings };
+}
+
+// ===== Portfolio (in-memory) =====
+
+export function getPortfolio() {
+  // Attach current market price to each entry
+  return _portfolio.map((p) => {
+    const watchId = p.watchId || `watch_${p.brand}_${p.model}`.replace(/\s+/g, '_').toLowerCase();
+    const cached = cache.get(watchId);
+    const currentMarketPrice = cached?.watch.marketPrice || null;
+
+    let profit: number | null = null;
+    let profitPct: number | null = null;
+    let roi: number | null = null;
+
+    if (p.status === 'sold' && p.soldPrice !== null) {
+      profit = p.soldPrice - p.purchasePrice - p.fees;
+      profitPct = ((profit) / p.purchasePrice) * 100;
+      // ROI considering fees
+      roi = profitPct;
+    }
+
+    // Unrealized P&L for holdings
+    let unrealizedProfit: number | null = null;
+    let unrealizedPct: number | null = null;
+    if (p.status === 'holding' && currentMarketPrice) {
+      unrealizedProfit = currentMarketPrice - p.purchasePrice - p.fees;
+      unrealizedPct = ((unrealizedProfit) / p.purchasePrice) * 100;
+    }
+
+    return {
+      ...p,
+      currentMarketPrice,
+      profit,
+      profitPct: profitPct !== null ? Math.round(profitPct * 10) / 10 : null,
+      roi: roi !== null ? Math.round(roi * 10) / 10 : null,
+      unrealizedProfit,
+      unrealizedPct: unrealizedPct !== null ? Math.round(unrealizedPct * 10) / 10 : null,
+    };
+  });
+}
+
+export function getPortfolioStats() {
+  const entries = getPortfolio();
+  const holdings = entries.filter((e) => e.status === 'holding');
+  const sold = entries.filter((e) => e.status === 'sold');
+
+  const totalInvested = holdings.reduce((s, e) => s + e.purchasePrice, 0);
+  const totalMarketValue = holdings.reduce((s, e) => s + (e.currentMarketPrice || e.purchasePrice), 0);
+  const unrealizedPL = totalMarketValue - totalInvested;
+  const unrealizedPLPct = totalInvested > 0 ? (unrealizedPL / totalInvested) * 100 : 0;
+
+  const totalSoldRevenue = sold.reduce((s, e) => s + (e.soldPrice || 0), 0);
+  const totalSoldCost = sold.reduce((s, e) => s + e.purchasePrice + e.fees, 0);
+  const realizedPL = totalSoldRevenue - totalSoldCost;
+  const realizedPLPct = totalSoldCost > 0 ? (realizedPL / totalSoldCost) * 100 : 0;
+  const totalFees = sold.reduce((s, e) => s + e.fees, 0);
+
+  const bestFlip = sold.length > 0
+    ? sold.reduce((best, e) => (e.profit !== null && (best === null || e.profit > (best.profit || 0))) ? e : best, sold[0])
+    : null;
+
+  return {
+    holdingCount: holdings.length,
+    soldCount: sold.length,
+    totalInvested: Math.round(totalInvested),
+    totalMarketValue: Math.round(totalMarketValue),
+    unrealizedPL: Math.round(unrealizedPL),
+    unrealizedPLPct: Math.round(unrealizedPLPct * 10) / 10,
+    realizedPL: Math.round(realizedPL),
+    realizedPLPct: Math.round(realizedPLPct * 10) / 10,
+    totalFees: Math.round(totalFees),
+    bestFlip,
+  };
+}
+
+export function addToPortfolio(data: {
+  watchId?: string;
+  brand: string;
+  model: string;
+  reference?: string;
+  purchasePrice: number;
+  purchaseDate?: string;
+  purchaseSource?: string;
+  purchaseUrl?: string;
+  fees?: number;
+  notes?: string;
+}): PortfolioEntry {
+  const entry: PortfolioEntry = {
+    id: genId(),
+    watchId: data.watchId || null,
+    brand: data.brand,
+    model: data.model,
+    reference: data.reference || '',
+    purchasePrice: data.purchasePrice,
+    purchaseDate: data.purchaseDate || new Date().toISOString(),
+    purchaseSource: data.purchaseSource || '',
+    purchaseUrl: data.purchaseUrl || null,
+    soldPrice: null,
+    soldDate: null,
+    soldSource: null,
+    fees: data.fees || 0,
+    notes: data.notes || '',
+    status: 'holding',
+    createdAt: new Date().toISOString(),
+  };
+  _portfolio.push(entry);
+  return entry;
+}
+
+export function markAsSold(id: string, data: {
+  soldPrice: number;
+  soldDate?: string;
+  soldSource?: string;
+  fees?: number;
+}): PortfolioEntry | null {
+  const entry = _portfolio.find((p) => p.id === id);
+  if (!entry) return null;
+  entry.soldPrice = data.soldPrice;
+  entry.soldDate = data.soldDate || new Date().toISOString();
+  entry.soldSource = data.soldSource || '';
+  if (data.fees !== undefined) entry.fees = data.fees;
+  entry.status = 'sold';
+  return entry;
+}
+
+export function updatePortfolioEntry(id: string, data: Partial<PortfolioEntry>): PortfolioEntry | null {
+  const entry = _portfolio.find((p) => p.id === id);
+  if (!entry) return null;
+  if (data.purchasePrice !== undefined) entry.purchasePrice = data.purchasePrice;
+  if (data.purchaseDate !== undefined) entry.purchaseDate = data.purchaseDate;
+  if (data.purchaseSource !== undefined) entry.purchaseSource = data.purchaseSource;
+  if (data.fees !== undefined) entry.fees = data.fees;
+  if (data.notes !== undefined) entry.notes = data.notes;
+  if (data.soldPrice !== undefined) entry.soldPrice = data.soldPrice;
+  if (data.soldDate !== undefined) entry.soldDate = data.soldDate;
+  if (data.soldSource !== undefined) entry.soldSource = data.soldSource;
+  if (data.status !== undefined) entry.status = data.status;
+  return entry;
+}
+
+export function deletePortfolioEntry(id: string): boolean {
+  const len = _portfolio.length;
+  _portfolio = _portfolio.filter((p) => p.id !== id);
+  return _portfolio.length < len;
 }
