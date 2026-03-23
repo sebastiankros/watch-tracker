@@ -152,68 +152,65 @@ interface C24JsonLd {
 
 export async function scrapeChrono24(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
-  // usedWhere=us filters to dealers that ship to the USA
   const targetUrl = `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true&usedWhere=us&priceTo=${maxPrice}&priceFrom=500`;
   const html = await fetchViaProxy(targetUrl, true);
 
   const listings: ScrapedListing[] = [];
   const seen = new Set<string>();
 
-  // Parse JSON-LD structured data from the page
+  // Strategy 1: JSON-LD @graph parsing (legacy format)
   const jsonLdMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
-  if (!jsonLdMatch) return listings;
-
-  try {
-    const data: C24JsonLd = JSON.parse(jsonLdMatch[1]);
-    const graph = data['@graph'] || [];
-
-    // Find the AggregateOffer entry which contains all listing offers
-    for (const entry of graph) {
-      if (!entry.offers) continue;
-      const offers = Array.isArray(entry.offers) ? entry.offers : [entry.offers];
-
-      for (const offer of offers) {
-        if (!offer.name || !offer.price || !offer.url) continue;
-
-        const title = String(offer.name).trim();
-        const price = typeof offer.price === 'string' ? parseInt(offer.price, 10) : offer.price;
-        const url = String(offer.url);
-
-        const id = url.match(/--id(\d+)/)?.[1];
-        if (id && seen.has(id)) continue;
-        if (id) seen.add(id);
-
-        if (!title || isJunkListing(title)) continue;
-        if (price < 500 || price > maxPrice) continue;
-
-        // Validate title relevance
-        const queryWords = query.toLowerCase().split(/\s+/);
-        const titleLower = title.toLowerCase();
-        const matchCount = queryWords.filter((w) => titleLower.includes(w)).length;
-        if (matchCount < Math.min(2, queryWords.length)) continue;
-
-        listings.push({
-          title,
-          price,
-          url,
-          source: 'Chrono24',
-          postedAgo: '',
-        });
+  if (jsonLdMatch) {
+    try {
+      const data: C24JsonLd = JSON.parse(jsonLdMatch[1]);
+      const graph = data['@graph'] || [];
+      for (const entry of graph) {
+        if (!entry.offers) continue;
+        const offers = Array.isArray(entry.offers) ? entry.offers : [entry.offers];
+        for (const offer of offers) {
+          if (!offer.name || !offer.price || !offer.url) continue;
+          const title = String(offer.name).trim();
+          const price = typeof offer.price === 'string' ? parseInt(offer.price, 10) : offer.price;
+          const url = String(offer.url);
+          const id = url.match(/--id(\d+)/)?.[1];
+          if (id && seen.has(id)) continue;
+          if (id) seen.add(id);
+          if (!title || isJunkListing(title)) continue;
+          if (price < 500 || price > maxPrice) continue;
+          const queryWords = query.toLowerCase().split(/\s+/);
+          const titleLower = title.toLowerCase();
+          const matchCount = queryWords.filter((w) => titleLower.includes(w)).length;
+          if (matchCount < Math.min(2, queryWords.length)) continue;
+          listings.push({ title, price, url, source: 'Chrono24', postedAgo: '' });
+        }
       }
+    } catch {
+      // JSON-LD parse failed, fall through to Strategy 2
     }
-  } catch {
-    // Fallback: regex extraction if JSON parsing fails
-    const offerBlocks = [...html.matchAll(/"name"\s*:\s*"([^"]+)"[\s\S]*?"price"\s*:\s*"(\d+)"[\s\S]*?"url"\s*:\s*"([^"]+)"/g)];
+  }
+
+  // Strategy 2: regex extraction of "name"/"price"/"url" from embedded JSON
+  // Works with current Chrono24 page structure where listing data is in inline scripts
+  if (listings.length === 0) {
+    const offerBlocks = [...html.matchAll(/"name":"([^"]+)"[\s\S]{0,300}?"price":"(\d+)"[\s\S]{0,300}?"url":"([^"]+)"/g)];
     for (const match of offerBlocks) {
       const title = match[1].trim();
       const price = parseInt(match[2], 10);
       const url = match[3];
 
+      if (!url.includes('chrono24.com')) continue;
+
       const id = url.match(/--id(\d+)/)?.[1];
       if (id && seen.has(id)) continue;
       if (id) seen.add(id);
 
-      if (!title || isJunkListing(title) || price < 500 || price > maxPrice) continue;
+      if (!title || isJunkListing(title)) continue;
+      if (price < 500 || price > maxPrice) continue;
+
+      const queryWords = query.toLowerCase().split(/\s+/);
+      const titleLower = title.toLowerCase();
+      const matchCount = queryWords.filter((w) => titleLower.includes(w)).length;
+      if (matchCount < Math.min(2, queryWords.length)) continue;
 
       listings.push({ title, price, url, source: 'Chrono24', postedAgo: '' });
     }
