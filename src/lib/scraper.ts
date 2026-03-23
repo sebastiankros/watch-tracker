@@ -382,12 +382,11 @@ export async function scrapeJomashop(query: string, maxPrice = 50000): Promise<S
 export async function scrapeAllMarketplaces(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   if (!SCRAPER_API_KEY) return [];
 
-  // All sources in parallel — wall time = slowest single source
+  // Chrono24 + eBay in parallel (2 API calls to conserve ScraperAPI credits)
+  // Watchfinder + Jomashop available but disabled to save quota
   const results = await Promise.allSettled([
     scrapeChrono24(query, maxPrice),
     scrapeEbay(query, maxPrice),
-    scrapeWatchfinder(query, maxPrice),
-    scrapeJomashop(query, maxPrice),
   ]);
 
   const allListings = results.flatMap((r) =>

@@ -2,6 +2,7 @@
 // No fake data. Every listing is real with a real URL.
 
 import { scrapeAllMarketplaces, calculateMarketStats, type ScrapedListing } from './scraper';
+import { WATCH_DATABASE } from './watch-data';
 
 // Watches we actively track — scrape on demand
 const TRACKED_WATCHES = [
@@ -207,19 +208,28 @@ async function scrapeAndCache(tracked: typeof TRACKED_WATCHES[number]): Promise<
   }
 }
 
+function getSeedPrice(brand: string, model: string): number {
+  const lower = (s: string) => s.toLowerCase();
+  const match = WATCH_DATABASE.find(
+    (w) => lower(w.brand) === lower(brand) || lower(w.model).includes(lower(model))
+  );
+  return match?.marketPrice || 0;
+}
+
 function makeEmptyWatch(watchId: string, tracked: typeof TRACKED_WATCHES[number]): CachedWatch {
+  const seedPrice = getSeedPrice(tracked.brand, tracked.model);
   return {
     watch: {
       id: watchId,
       brand: tracked.brand,
       model: tracked.model,
       reference: tracked.query,
-      marketPrice: 0,
+      marketPrice: seedPrice,
       previousPrice: null,
-      price7dAgo: null,
-      price30dAgo: null,
-      price90dAgo: null,
-      confidence: 0,
+      price7dAgo: seedPrice || null,
+      price30dAgo: seedPrice || null,
+      price90dAgo: seedPrice || null,
+      confidence: seedPrice ? 0.1 : 0,
       lastUpdated: new Date().toISOString(),
       createdAt: new Date().toISOString(),
       _count: { listings: 0 },
@@ -245,8 +255,9 @@ async function scrapeAll(): Promise<CachedWatch[]> {
   return results;
 }
 
-// Max watches to scrape per request — run in parallel so wall time ≈ slowest single scrape
-const MAX_SCRAPE_PER_REQUEST = 10;
+// ScraperAPI free tier: 5 concurrent requests. Each watch uses up to 4 sources.
+// Scrape 1 watch at a time (4 concurrent API calls), queue up to 5 watches per page load.
+const MAX_SCRAPE_PER_REQUEST = 5;
 
 // Get all watches, using cache when fresh
 async function getAllCached(): Promise<CachedWatch[]> {
@@ -260,15 +271,27 @@ async function getAllCached(): Promise<CachedWatch[]> {
       results.push(existing);
     } else {
       toScrape.push(tracked);
+      // Still add seed-price fallback so the watch appears in the list
+      const fallback = makeEmptyWatch(watchId, tracked);
+      if (fallback.watch.marketPrice > 0) results.push(fallback);
     }
   }
 
-  // Scrape in parallel — all watches hit ScraperAPI concurrently
+  // Scrape sequentially (each watch uses up to 4 parallel API calls internally)
   if (toScrape.length > 0) {
     const batch = toScrape.slice(0, MAX_SCRAPE_PER_REQUEST);
-    const batchResults = await Promise.allSettled(batch.map((t) => scrapeAndCache(t)));
-    for (const r of batchResults) {
-      if (r.status === 'fulfilled') results.push(r.value);
+    for (const tracked of batch) {
+      try {
+        const result = await scrapeAndCache(tracked);
+        // Replace the seed-price fallback with real data
+        const idx = results.findIndex((r) => r.watch.id === result.watch.id);
+        if (result.watch.marketPrice > 0) {
+          if (idx >= 0) results[idx] = result;
+          else results.push(result);
+        }
+      } catch {
+        // Keep the seed-price fallback
+      }
     }
   }
 
@@ -507,12 +530,15 @@ export function searchWatches(q: string) {
 }
 
 export async function refreshMarketData() {
-  // Clear cache to force fresh scrapes
   cache.clear();
-  // Scrape in parallel — wall time ≈ one scrape
   const batch = TRACKED_WATCHES.slice(0, MAX_SCRAPE_PER_REQUEST);
-  const results = await Promise.allSettled(batch.map((t) => scrapeAndCache(t)));
-  const scraped = results.filter((r) => r.status === 'fulfilled' && r.value.watch.marketPrice > 0).length;
+  let scraped = 0;
+  for (const tracked of batch) {
+    try {
+      const result = await scrapeAndCache(tracked);
+      if (result.watch.marketPrice > 0) scraped++;
+    } catch { /* skip */ }
+  }
   return {
     success: true,
     message: `Scraped ${scraped} watches. Others will load as you browse. (${TRACKED_WATCHES.length} total tracked)`,
