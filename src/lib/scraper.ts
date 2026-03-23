@@ -1,4 +1,5 @@
 import * as http from 'http';
+import * as https from 'https';
 
 export interface ScrapedListing {
   title: string;
@@ -19,11 +20,15 @@ export interface ScrapedMarketData {
 }
 
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || '';
+const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || '';
+
+// Track which provider to use — rotate on failure
+let preferredProvider: 'scraperapi' | 'scrapingbee' = 'scraperapi';
 
 /**
- * Fetch via ScraperAPI proxy with JS rendering
+ * Fetch via ScraperAPI
  */
-function fetchViaProxy(targetUrl: string, render = true): Promise<string> {
+function fetchViaScraperAPI(targetUrl: string, render: boolean): Promise<string> {
   if (!SCRAPER_API_KEY) return Promise.reject(new Error('No SCRAPER_API_KEY'));
   const params = new URLSearchParams({
     api_key: SCRAPER_API_KEY,
@@ -33,7 +38,7 @@ function fetchViaProxy(targetUrl: string, render = true): Promise<string> {
   const proxyUrl = `http://api.scraperapi.com?${params.toString()}`;
 
   return new Promise((resolve, reject) => {
-    const req = http.get(proxyUrl, { timeout: 60000 }, (res) => {
+    const req = http.get(proxyUrl, { timeout: 55000 }, (res) => {
       let data = '';
       res.on('data', (c: string) => (data += c));
       res.on('end', () => {
@@ -46,6 +51,58 @@ function fetchViaProxy(targetUrl: string, render = true): Promise<string> {
     req.on('error', reject);
     req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
   });
+}
+
+/**
+ * Fetch via ScrapingBee
+ */
+function fetchViaScrapingBee(targetUrl: string, render: boolean): Promise<string> {
+  if (!SCRAPINGBEE_API_KEY) return Promise.reject(new Error('No SCRAPINGBEE_API_KEY'));
+  const params = new URLSearchParams({
+    api_key: SCRAPINGBEE_API_KEY,
+    url: targetUrl,
+    ...(render ? { render_js: 'true' } : { render_js: 'false' }),
+  });
+  const proxyUrl = `https://app.scrapingbee.com/api/v1/?${params.toString()}`;
+
+  return new Promise((resolve, reject) => {
+    const req = https.get(proxyUrl, { timeout: 55000 }, (res) => {
+      let data = '';
+      res.on('data', (c: string) => (data += c));
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 400) {
+          return reject(new Error(`ScrapingBee ${res.statusCode}`));
+        }
+        resolve(data);
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+  });
+}
+
+/**
+ * Fetch via proxy with automatic failover between providers
+ */
+async function fetchViaProxy(targetUrl: string, render = true): Promise<string> {
+  const providers = preferredProvider === 'scraperapi'
+    ? [fetchViaScraperAPI, fetchViaScrapingBee]
+    : [fetchViaScrapingBee, fetchViaScraperAPI];
+
+  for (let i = 0; i < providers.length; i++) {
+    try {
+      const result = await providers[i](targetUrl, render);
+      return result;
+    } catch (err) {
+      // If primary fails, switch preferred provider for future calls
+      if (i === 0) {
+        preferredProvider = preferredProvider === 'scraperapi' ? 'scrapingbee' : 'scraperapi';
+      }
+      // If both fail, throw the last error
+      if (i === providers.length - 1) throw err;
+    }
+  }
+  throw new Error('All scraping providers failed');
 }
 
 /**
@@ -380,13 +437,14 @@ export async function scrapeJomashop(query: string, maxPrice = 50000): Promise<S
  * All sources fire simultaneously to minimize wall time.
  */
 export async function scrapeAllMarketplaces(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
-  if (!SCRAPER_API_KEY) return [];
+  if (!SCRAPER_API_KEY && !SCRAPINGBEE_API_KEY) return [];
 
-  // Chrono24 + eBay in parallel (2 API calls to conserve ScraperAPI credits)
-  // Watchfinder + Jomashop available but disabled to save quota
+  // All 4 sources in parallel — failover between ScraperAPI and ScrapingBee
   const results = await Promise.allSettled([
     scrapeChrono24(query, maxPrice),
     scrapeEbay(query, maxPrice),
+    scrapeWatchfinder(query, maxPrice),
+    scrapeJomashop(query, maxPrice),
   ]);
 
   const allListings = results.flatMap((r) =>
