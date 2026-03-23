@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { formatPrice, discountColor, discountBg, timeAgo, badgeLabel, badgeStyle, formatDealForSharing } from '@/lib/utils';
+import { formatPrice, discountColor, discountBg, badgeLabel, badgeStyle, formatDealForSharing } from '@/lib/utils';
 import { ExternalLinkIcon, CopyIcon, SearchIcon, SpinnerIcon } from '@/components/Icons';
 import Breadcrumbs from '@/components/Breadcrumbs';
 import ScoreRing from '@/components/ScoreRing';
@@ -30,6 +30,16 @@ interface Deal {
   confidence: number;
 }
 
+interface DealGroup {
+  watchId: string;
+  brand: string;
+  model: string;
+  reference: string;
+  marketPrice: number;
+  best: Deal;
+  others: Deal[];
+}
+
 interface DealStats {
   totalDeals: number;
   dealsAbove5: number;
@@ -46,6 +56,7 @@ export default function DealsPage() {
   const [brands, setBrands] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [brand, setBrand] = useState('');
   const [minDiscount, setMinDiscount] = useState('3');
@@ -82,6 +93,45 @@ export default function DealsPage() {
     loadDeals();
   }, [loadDeals]);
 
+  // Group deals by watchId, best deal first
+  const groups: DealGroup[] = useMemo(() => {
+    const map = new Map<string, Deal[]>();
+    for (const deal of deals) {
+      const arr = map.get(deal.watchId) || [];
+      arr.push(deal);
+      map.set(deal.watchId, arr);
+    }
+
+    const result: DealGroup[] = [];
+    for (const [watchId, watchDeals] of map) {
+      // Sort by deal score descending within group
+      watchDeals.sort((a, b) => b.dealScore - a.dealScore);
+      const [best, ...others] = watchDeals;
+      result.push({
+        watchId,
+        brand: best.brand,
+        model: best.model,
+        reference: best.reference,
+        marketPrice: best.marketPrice,
+        best,
+        others,
+      });
+    }
+
+    // Sort groups by best deal's score
+    result.sort((a, b) => b.best.dealScore - a.best.dealScore);
+    return result;
+  }, [deals]);
+
+  function toggleExpand(watchId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(watchId)) next.delete(watchId);
+      else next.add(watchId);
+      return next;
+    });
+  }
+
   function shareDeal(deal: Deal) {
     const text = formatDealForSharing(deal);
     navigator.clipboard.writeText(text);
@@ -95,15 +145,15 @@ export default function DealsPage() {
 
       <div>
         <h1 className="text-2xl font-bold text-white">Deals</h1>
-        <p className="text-sm text-gray-500">Watches listed below market value · Ranked by Deal Score</p>
+        <p className="text-sm text-gray-500">Best deal per watch · Click to see more listings</p>
       </div>
 
       {/* Stats Bar */}
       {stats && (
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+          <MiniStat label="Watches" value={groups.length} />
           <MiniStat label="Total Deals" value={stats.totalDeals} />
           <MiniStat label="Hot Deals" value={stats.hotDeals} color="text-red-400" />
-          <MiniStat label=">5% Under" value={stats.dealsAbove5} color="text-orange-400" />
           <MiniStat label=">10% Under" value={stats.dealsAbove10} color="text-yellow-400" />
           <MiniStat label="Avg Discount" value={`${stats.avgDiscount}%`} color="text-green-400" />
           <MiniStat label="Avg Score" value={stats.avgScore} color="text-blue-400" />
@@ -192,7 +242,7 @@ export default function DealsPage() {
       {/* Deals */}
       {loading ? (
         <SkeletonTable rows={8} cols={7} />
-      ) : deals.length === 0 ? (
+      ) : groups.length === 0 ? (
         <div className="bg-[#111118] border border-gray-800 rounded-xl p-12 text-center">
           <SearchIcon className="w-10 h-10 text-gray-600 mx-auto mb-3" />
           <p className="text-gray-400">No deals match your filters</p>
@@ -200,147 +250,222 @@ export default function DealsPage() {
         </div>
       ) : (
         <>
-          {/* Desktop Table */}
-          <div className="hidden lg:block bg-[#111118] border border-gray-800 rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-800 text-xs text-gray-500 uppercase tracking-wider">
-                    <th className="text-center px-3 py-3 w-12">Score</th>
-                    <th className="text-left px-4 py-3">Watch</th>
-                    <th className="text-right px-4 py-3">Price</th>
-                    <th className="text-left px-4 py-3 w-40">vs Market</th>
-                    <th className="text-right px-4 py-3">Discount</th>
-                    <th className="text-right px-4 py-3">Savings</th>
-                    <th className="text-left px-4 py-3">Source</th>
-                    <th className="text-center px-3 py-3 w-24">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800/50">
-                  {deals.map((deal) => (
-                    <tr key={deal.id} className={`deal-row ${deal.badge === 'hot' ? 'deal-hot' : ''}`}>
-                      <td className="px-3 py-3 text-center">
-                        <ScoreRing score={deal.dealScore} size={32} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <Link href={`/watches/${deal.watchId}`} className="hover:text-blue-400 transition">
-                          <div className="flex items-center gap-2">
-                            <span className="text-white font-medium text-sm">{deal.brand} {deal.model}</span>
-                            {deal.badge && (
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeStyle(deal.badge)}`}>
-                                {badgeLabel(deal.badge)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs text-gray-500">Ref. {deal.reference}</div>
+          {/* Desktop */}
+          <div className="hidden lg:block space-y-2">
+            {groups.map((group) => {
+              const isOpen = expanded.has(group.watchId);
+              const deal = group.best;
+              return (
+                <div key={group.watchId} className="bg-[#111118] border border-gray-800 rounded-xl overflow-hidden">
+                  {/* Best deal row */}
+                  <div
+                    className={`flex items-center gap-4 px-4 py-3 cursor-pointer hover:bg-white/[0.02] transition ${deal.badge === 'hot' ? 'deal-hot' : ''}`}
+                    onClick={() => group.others.length > 0 && toggleExpand(group.watchId)}
+                  >
+                    <ScoreRing score={deal.dealScore} size={36} />
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Link href={`/watches/${deal.watchId}`} className="hover:text-blue-400 transition" onClick={(e) => e.stopPropagation()}>
+                          <span className="text-white font-semibold text-sm">{deal.brand} {deal.model}</span>
                         </Link>
-                      </td>
-                      <td className="text-right px-4 py-3 text-white font-semibold text-sm">
-                        {formatPrice(deal.listingPrice)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <PriceBar listingPrice={deal.listingPrice} marketPrice={deal.marketPrice} />
-                        <div className="text-[10px] text-gray-500 mt-1">Market: {formatPrice(deal.marketPrice)}</div>
-                      </td>
-                      <td className="text-right px-4 py-3">
-                        <span className={`inline-block px-2 py-0.5 rounded-md text-sm font-bold border ${discountBg(deal.discount)} ${discountColor(deal.discount)}`}>
-                          -{deal.discount}%
-                        </span>
-                      </td>
-                      <td className="text-right px-4 py-3 text-green-400 text-sm font-medium">
-                        {formatPrice(deal.savings)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm text-gray-300">{deal.source}</div>
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <a
-                            href={deal.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-400 hover:text-blue-300 p-1"
-                            title="Open listing"
-                          >
-                            <ExternalLinkIcon className="w-3.5 h-3.5" />
-                          </a>
-                          <button
-                            onClick={() => shareDeal(deal)}
-                            className="text-gray-500 hover:text-white p-1"
-                            title="Copy deal info"
-                          >
-                            {copiedId === deal.id ? (
-                              <span className="text-green-400 text-[10px] font-bold">Copied</span>
-                            ) : (
-                              <CopyIcon className="w-3.5 h-3.5" />
-                            )}
-                          </button>
+                        {deal.badge && (
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeStyle(deal.badge)}`}>
+                            {badgeLabel(deal.badge)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500">{deal.source} · Ref. {deal.reference}</div>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="text-white font-semibold text-sm">{formatPrice(deal.listingPrice)}</div>
+                      <div className="text-[10px] text-gray-500">Market: {formatPrice(deal.marketPrice)}</div>
+                    </div>
+
+                    <div className="w-32">
+                      <PriceBar listingPrice={deal.listingPrice} marketPrice={deal.marketPrice} />
+                    </div>
+
+                    <span className={`inline-block px-2 py-0.5 rounded-md text-sm font-bold border ${discountBg(deal.discount)} ${discountColor(deal.discount)}`}>
+                      -{deal.discount}%
+                    </span>
+
+                    <div className="text-green-400 text-sm font-medium w-20 text-right">
+                      {formatPrice(deal.savings)}
+                    </div>
+
+                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <a href={deal.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 p-1" title="Open listing">
+                        <ExternalLinkIcon className="w-3.5 h-3.5" />
+                      </a>
+                      <button onClick={() => shareDeal(deal)} className="text-gray-500 hover:text-white p-1" title="Copy deal info">
+                        {copiedId === deal.id ? <span className="text-green-400 text-[10px] font-bold">OK</span> : <CopyIcon className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+
+                    {/* Expand chevron */}
+                    {group.others.length > 0 ? (
+                      <div className="text-gray-500 w-6 text-center">
+                        <svg className={`w-4 h-4 mx-auto transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                        <div className="text-[9px] text-gray-600">{group.others.length} more</div>
+                      </div>
+                    ) : (
+                      <div className="w-6" />
+                    )}
+                  </div>
+
+                  {/* Expanded other deals */}
+                  {isOpen && group.others.length > 0 && (
+                    <div className="border-t border-gray-800/50 bg-[#0c0c12]">
+                      {group.others.map((d) => (
+                        <div key={d.id} className="flex items-center gap-4 px-4 py-2.5 border-b border-gray-800/30 last:border-0 hover:bg-white/[0.02] transition">
+                          <div className="w-9 flex justify-center">
+                            <ScoreRing score={d.dealScore} size={28} />
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="text-gray-300 text-sm truncate">{d.source}</div>
+                          </div>
+
+                          <div className="text-right">
+                            <div className="text-white text-sm">{formatPrice(d.listingPrice)}</div>
+                          </div>
+
+                          <div className="w-32">
+                            <PriceBar listingPrice={d.listingPrice} marketPrice={d.marketPrice} />
+                          </div>
+
+                          <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-bold border ${discountBg(d.discount)} ${discountColor(d.discount)}`}>
+                            -{d.discount}%
+                          </span>
+
+                          <div className="text-green-400 text-xs font-medium w-20 text-right">
+                            {formatPrice(d.savings)}
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 p-1">
+                              <ExternalLinkIcon className="w-3.5 h-3.5" />
+                            </a>
+                            <button onClick={() => shareDeal(d)} className="text-gray-500 hover:text-white p-1">
+                              {copiedId === d.id ? <span className="text-green-400 text-[10px] font-bold">OK</span> : <CopyIcon className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+
+                          <div className="w-6" />
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Mobile Cards */}
           <div className="lg:hidden space-y-3">
-            {deals.map((deal) => (
-              <div
-                key={deal.id}
-                className={`bg-[#111118] border border-gray-800 rounded-xl p-4 space-y-3 ${deal.badge === 'hot' ? 'deal-hot' : ''}`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <ScoreRing score={deal.dealScore} size={40} />
-                    <div>
-                      <Link href={`/watches/${deal.watchId}`} className="hover:text-blue-400">
-                        <div className="text-white font-medium text-sm">{deal.brand} {deal.model}</div>
-                      </Link>
-                      <div className="text-xs text-gray-500">{deal.source}</div>
+            {groups.map((group) => {
+              const isOpen = expanded.has(group.watchId);
+              const deal = group.best;
+              return (
+                <div key={group.watchId} className={`bg-[#111118] border border-gray-800 rounded-xl overflow-hidden ${deal.badge === 'hot' ? 'deal-hot' : ''}`}>
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <ScoreRing score={deal.dealScore} size={40} />
+                        <div>
+                          <Link href={`/watches/${deal.watchId}`} className="hover:text-blue-400">
+                            <div className="text-white font-medium text-sm">{deal.brand} {deal.model}</div>
+                          </Link>
+                          <div className="text-xs text-gray-500">{deal.source}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {deal.badge && (
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeStyle(deal.badge)}`}>
+                            {badgeLabel(deal.badge)}
+                          </span>
+                        )}
+                        <span className={`inline-block px-2 py-0.5 rounded-md text-sm font-bold border ${discountBg(deal.discount)} ${discountColor(deal.discount)}`}>
+                          -{deal.discount}%
+                        </span>
+                      </div>
+                    </div>
+
+                    <PriceBar listingPrice={deal.listingPrice} marketPrice={deal.marketPrice} />
+
+                    <div className="flex items-center justify-between text-sm">
+                      <div>
+                        <span className="text-white font-semibold">{formatPrice(deal.listingPrice)}</span>
+                        <span className="text-gray-600 mx-1">vs</span>
+                        <span className="text-gray-400">{formatPrice(deal.marketPrice)}</span>
+                      </div>
+                      <span className="text-green-400 font-medium">Save {formatPrice(deal.savings)}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t border-gray-800/50">
+                      <button onClick={() => shareDeal(deal)} className="text-xs text-gray-500 hover:text-white flex items-center gap-1">
+                        <CopyIcon className="w-3 h-3" />
+                        {copiedId === deal.id ? 'Copied!' : 'Share'}
+                      </button>
+                      <a href={deal.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 font-medium text-sm inline-flex items-center gap-1">
+                        View <ExternalLinkIcon className="w-3 h-3" />
+                      </a>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {deal.badge && (
-                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeStyle(deal.badge)}`}>
-                        {badgeLabel(deal.badge)}
-                      </span>
-                    )}
-                    <span className={`inline-block px-2 py-0.5 rounded-md text-sm font-bold border ${discountBg(deal.discount)} ${discountColor(deal.discount)}`}>
-                      -{deal.discount}%
-                    </span>
-                  </div>
-                </div>
 
-                <PriceBar listingPrice={deal.listingPrice} marketPrice={deal.marketPrice} />
+                  {/* Expand toggle */}
+                  {group.others.length > 0 && (
+                    <button
+                      onClick={() => toggleExpand(group.watchId)}
+                      className="w-full px-4 py-2 border-t border-gray-800/50 text-xs text-gray-400 hover:text-white hover:bg-white/[0.02] transition flex items-center justify-center gap-1"
+                    >
+                      <svg className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                      {isOpen ? 'Hide' : `${group.others.length} more deal${group.others.length > 1 ? 's' : ''}`}
+                    </button>
+                  )}
 
-                <div className="flex items-center justify-between text-sm">
-                  <div>
-                    <span className="text-white font-semibold">{formatPrice(deal.listingPrice)}</span>
-                    <span className="text-gray-600 mx-1">vs</span>
-                    <span className="text-gray-400">{formatPrice(deal.marketPrice)}</span>
-                  </div>
-                  <span className="text-green-400 font-medium">Save {formatPrice(deal.savings)}</span>
+                  {/* Expanded deals */}
+                  {isOpen && group.others.length > 0 && (
+                    <div className="border-t border-gray-800/50 bg-[#0c0c12]">
+                      {group.others.map((d) => (
+                        <div key={d.id} className="px-4 py-3 border-b border-gray-800/30 last:border-0 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <ScoreRing score={d.dealScore} size={28} />
+                              <span className="text-gray-300 text-sm">{d.source}</span>
+                            </div>
+                            <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-bold border ${discountBg(d.discount)} ${discountColor(d.discount)}`}>
+                              -{d.discount}%
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-white">{formatPrice(d.listingPrice)}</span>
+                            <span className="text-green-400 text-xs">Save {formatPrice(d.savings)}</span>
+                          </div>
+                          <div className="flex justify-end">
+                            <a href={d.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 text-xs inline-flex items-center gap-1">
+                              View <ExternalLinkIcon className="w-3 h-3" />
+                            </a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-
-                <div className="flex items-center justify-between pt-1 border-t border-gray-800/50">
-                  <button onClick={() => shareDeal(deal)} className="text-xs text-gray-500 hover:text-white flex items-center gap-1">
-                    <CopyIcon className="w-3 h-3" />
-                    {copiedId === deal.id ? 'Copied!' : 'Share'}
-                  </button>
-                  <a href={deal.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 font-medium text-sm inline-flex items-center gap-1">
-                    View <ExternalLinkIcon className="w-3 h-3" />
-                  </a>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
 
       <div className="text-center text-xs text-gray-600">
-        Showing {deals.length} deals · Ranked by Deal Score (discount, savings, confidence, market depth)
+        Showing {groups.length} watches · {deals.length} total deals
       </div>
     </div>
   );
