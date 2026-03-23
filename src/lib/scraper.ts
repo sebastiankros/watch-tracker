@@ -425,7 +425,7 @@ export function getMarketplaceSearchUrls(query: string) {
 /**
  * Calculate market stats from listings
  */
-export function calculateMarketStats(listings: ScrapedListing[], minPrice = 500, maxPrice = 7000): {
+export function calculateMarketStats(listings: ScrapedListing[], minPrice = 500, maxPrice = 50000): {
   marketPrice: number | null;
   medianPrice: number | null;
   lowPrice: number | null;

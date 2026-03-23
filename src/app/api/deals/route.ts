@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const brand = searchParams.get('brand') || undefined;
   const minDiscount = Number(searchParams.get('minDiscount') || '0');
   const minPrice = Number(searchParams.get('minPrice') || '500');
-  const maxPrice = Number(searchParams.get('maxPrice') || '7000');
+  const maxPrice = Number(searchParams.get('maxPrice') || '50000');
   const sort = searchParams.get('sort') || 'discount';
 
   const data = await getDeals({ brand, minDiscount, minPrice, maxPrice, sort });
