@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { formatPrice, formatPct, trendColor } from '@/lib/utils';
+import { cachedFetch } from '@/lib/api-cache';
 import { SpinnerIcon, SearchIcon } from '@/components/Icons';
 import Breadcrumbs from '@/components/Breadcrumbs';
 import { SkeletonTable } from '@/components/Skeleton';
@@ -53,8 +54,7 @@ export default function MarketPage() {
       params.set('minPrice', '500');
     }
 
-    const res = await fetch(`/api/watches?${params}`);
-    const data = await res.json();
+    const data = await cachedFetch<{ watches: Watch[]; brands: string[] }>(`/api/watches?${params}`);
     let filtered = data.watches || [];
 
     if (trendFilter === 'up') {

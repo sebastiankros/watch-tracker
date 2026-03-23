@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { formatPrice } from '@/lib/utils';
 import { PlusIcon, TrashIcon, AlertIcon, SpinnerIcon } from '@/components/Icons';
+import { cachedFetch } from '@/lib/api-cache';
 import Breadcrumbs from '@/components/Breadcrumbs';
 
 interface Alert {
@@ -39,7 +40,7 @@ export default function AlertsPage() {
 
   useEffect(() => {
     loadAlerts();
-    fetch('/api/watches').then(r => r.json()).then(d => setBrands(d.brands || []));
+    cachedFetch<{ brands: string[] }>('/api/watches').then(d => setBrands(d.brands || []));
   }, []);
 
   async function handleCreate(e: React.FormEvent) {

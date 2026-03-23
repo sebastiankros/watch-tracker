@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { formatPrice, discountColor, discountBg, badgeLabel, badgeStyle, formatDealForSharing } from '@/lib/utils';
+import { cachedFetch } from '@/lib/api-cache';
 import { ExternalLinkIcon, CopyIcon, SearchIcon, SpinnerIcon } from '@/components/Icons';
 import Breadcrumbs from '@/components/Breadcrumbs';
 import ScoreRing from '@/components/ScoreRing';
@@ -74,8 +75,7 @@ export default function DealsPage() {
       params.set('maxPrice', maxPrice);
       params.set('sort', sort);
 
-      const res = await fetch(`/api/deals?${params}`);
-      const data = await res.json();
+      const data = await cachedFetch<{ deals: Deal[]; stats: DealStats }>(`/api/deals?${params}`);
       setDeals(data.deals || []);
       setStats(data.stats || null);
     } catch (err) {
@@ -86,7 +86,7 @@ export default function DealsPage() {
   }, [brand, minDiscount, minPrice, maxPrice, sort]);
 
   useEffect(() => {
-    fetch('/api/watches').then(r => r.json()).then(d => setBrands(d.brands || []));
+    cachedFetch<{ brands: string[] }>('/api/watches').then(d => setBrands(d.brands || []));
   }, []);
 
   useEffect(() => {

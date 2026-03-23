@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { SpinnerIcon, SettingsIcon } from '@/components/Icons';
 import Breadcrumbs from '@/components/Breadcrumbs';
+import { cachedFetch, invalidateCache } from '@/lib/api-cache';
 
 interface Settings {
   refreshInterval: number;
@@ -21,8 +22,8 @@ export default function SettingsPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/settings').then(r => r.json()),
-      fetch('/api/watches').then(r => r.json()),
+      cachedFetch<{ settings: Settings }>('/api/settings'),
+      cachedFetch<{ brands: string[] }>('/api/watches'),
     ]).then(([settingsData, watchesData]) => {
       setSettings(settingsData.settings);
       setBrands(watchesData.brands || []);
@@ -41,6 +42,7 @@ export default function SettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
+      invalidateCache(); // Clear cached data so new settings take effect
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } finally {

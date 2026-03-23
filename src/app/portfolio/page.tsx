@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { formatPrice } from '@/lib/utils';
+import { cachedFetch } from '@/lib/api-cache';
 import {
   getPortfolioEntries,
   enrichWithMarketPrices,
@@ -39,8 +40,7 @@ export default function PortfolioPage() {
     // Fetch market prices to enrich entries
     const marketPrices = new Map<string, number>();
     try {
-      const res = await fetch('/api/watches');
-      const data = await res.json();
+      const data = await cachedFetch<{ watches: { id: string; marketPrice: number }[] }>('/api/watches');
       for (const w of (data.watches || [])) {
         marketPrices.set(w.id, w.marketPrice);
       }

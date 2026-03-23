@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { formatPrice, discountColor, timeAgo, badgeLabel, badgeStyle } from '@/lib/utils';
+import { cachedFetch, invalidateCache } from '@/lib/api-cache';
 import { WatchIcon, DealsIcon, MarketIcon, AlertIcon, RefreshIcon, SpinnerIcon, ExternalLinkIcon, TrendUpIcon, TrendDownIcon, ArrowRightIcon, SearchIcon } from '@/components/Icons';
 import { SkeletonDashboard } from '@/components/Skeleton';
 import ScoreRing from '@/components/ScoreRing';
@@ -52,12 +53,10 @@ export default function DashboardPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [watchesRes, dealsRes] = await Promise.all([
-        fetch('/api/watches'),
-        fetch('/api/deals?minDiscount=3&sort=score'),
+      const [watchesData, dealsData] = await Promise.all([
+        cachedFetch<{ watches: { marketPrice: number; previousPrice: number | null; lastUpdated: string }[] }>('/api/watches'),
+        cachedFetch<{ deals: DealSummary[]; stats: { totalDeals: number; avgDiscount: number; avgScore: number; hotDeals: number } }>('/api/deals?minDiscount=3&sort=score'),
       ]);
-      const watchesData = await watchesRes.json();
-      const dealsData = await dealsRes.json();
 
       const watches = watchesData.watches || [];
       let upCount = 0, downCount = 0;
@@ -89,6 +88,7 @@ export default function DashboardPage() {
   async function handleRefresh() {
     setRefreshing(true);
     try {
+      invalidateCache();
       await fetch('/api/market/refresh');
       await loadData();
       setCountdown(AUTO_REFRESH_INTERVAL / 1000);
