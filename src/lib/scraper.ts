@@ -29,7 +29,7 @@ async function fetchViaScraperAPI(targetUrl: string, render: boolean): Promise<s
     url: targetUrl,
     ...(render ? { render: 'true' } : {}),
   });
-  const proxyUrl = `http://api.scraperapi.com?${params.toString()}`;
+  const proxyUrl = `https://api.scraperapi.com?${params.toString()}`;
   const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`ScraperAPI ${res.status}`);
   return res.text();
