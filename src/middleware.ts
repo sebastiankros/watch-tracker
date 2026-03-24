@@ -6,7 +6,7 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'fallback-secret-change-me'
 );
 
-const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/debug'];
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/debug', '/api/cron/', '/api/alerts/check'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

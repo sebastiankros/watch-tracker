@@ -64,12 +64,14 @@ export default function DealsPage() {
   const [minPrice, setMinPrice] = useState('500');
   const [maxPrice, setMaxPrice] = useState('50000');
   const [sort, setSort] = useState('score');
+  const [condition, setCondition] = useState('');
 
   const loadDeals = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (brand) params.set('brand', brand);
+      if (condition) params.set('condition', condition);
       params.set('minDiscount', minDiscount);
       params.set('minPrice', minPrice);
       params.set('maxPrice', maxPrice);
@@ -83,7 +85,7 @@ export default function DealsPage() {
     } finally {
       setLoading(false);
     }
-  }, [brand, minDiscount, minPrice, maxPrice, sort]);
+  }, [brand, minDiscount, minPrice, maxPrice, sort, condition]);
 
   useEffect(() => {
     cachedFetch<{ brands: string[] }>('/api/watches').then(d => setBrands(d.brands || []));
@@ -103,9 +105,9 @@ export default function DealsPage() {
     }
 
     const result: DealGroup[] = [];
-    for (const [watchId, watchDeals] of map) {
+    map.forEach((watchDeals: Deal[], watchId: string) => {
       // Sort by deal score descending within group
-      watchDeals.sort((a, b) => b.dealScore - a.dealScore);
+      watchDeals.sort((a: Deal, b: Deal) => b.dealScore - a.dealScore);
       const [best, ...others] = watchDeals;
       result.push({
         watchId,
@@ -116,7 +118,7 @@ export default function DealsPage() {
         best,
         others,
       });
-    }
+    });
 
     // Sort groups by best deal's score
     result.sort((a, b) => b.best.dealScore - a.best.dealScore);
@@ -162,7 +164,7 @@ export default function DealsPage() {
 
       {/* Filters */}
       <div className="bg-[#111118] border border-gray-800 rounded-xl p-4">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
           <div>
             <label className="text-xs text-gray-500 block mb-1">Brand</label>
             <select
@@ -218,6 +220,21 @@ export default function DealsPage() {
               <option value="25000">Up to $25,000</option>
               <option value="50000">Up to $50,000</option>
               <option value="100000">No limit</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Condition</label>
+            <select
+              value={condition}
+              onChange={(e) => setCondition(e.target.value)}
+              className="w-full bg-[#0a0a0f] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
+            >
+              <option value="">All Conditions</option>
+              <option value="New">New / Unworn</option>
+              <option value="Excellent">Excellent</option>
+              <option value="Very Good">Very Good</option>
+              <option value="Good">Good / Pre-Owned</option>
+              <option value="Fair">Fair</option>
             </select>
           </div>
           <div>

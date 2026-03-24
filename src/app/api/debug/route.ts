@@ -26,7 +26,7 @@ export async function GET() {
     const res = await fetch(scraperApiUrl, { signal: AbortSignal.timeout(20000) });
     const text = await res.text();
     // Try the regex extraction on this HTML
-    const offerBlocks = [...text.matchAll(/"name":"([^"]+)"[\s\S]{0,300}?"price":"(\d+)"[\s\S]{0,300}?"url":"([^"]+)"/g)];
+    const offerBlocks = Array.from(text.matchAll(/"name":"([^"]+)"[\s\S]{0,300}?"price":"(\d+)"[\s\S]{0,300}?"url":"([^"]+)"/g));
     const c24Filtered = offerBlocks.filter(m => m[3].includes('chrono24.com'));
     results.directFetch = {
       status: res.status,

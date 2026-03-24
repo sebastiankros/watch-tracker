@@ -10,8 +10,9 @@ export async function GET(request: Request) {
   const minDiscount = Number(searchParams.get('minDiscount') || '0');
   const minPrice = Number(searchParams.get('minPrice') || '500');
   const maxPrice = Number(searchParams.get('maxPrice') || '50000');
-  const sort = searchParams.get('sort') || 'discount';
+  const sort = searchParams.get('sort') || 'score';
+  const condition = searchParams.get('condition') || undefined;
 
-  const data = await getDeals({ brand, minDiscount, minPrice, maxPrice, sort });
+  const data = await getDeals({ brand, minDiscount, minPrice, maxPrice, sort, condition });
   return NextResponse.json(data);
 }
