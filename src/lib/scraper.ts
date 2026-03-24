@@ -48,13 +48,19 @@ async function fetchViaScrapingBee(targetUrl: string, render: boolean): Promise<
  * Race both providers in parallel — first successful response wins.
  */
 async function fetchViaProxy(targetUrl: string, render = false): Promise<string> {
-  const candidates: Promise<string>[] = [];
-  if (process.env.SCRAPER_API_KEY) candidates.push(fetchViaScraperAPI(targetUrl, render));
-  if (process.env.SCRAPINGBEE_API_KEY) candidates.push(fetchViaScrapingBee(targetUrl, render));
-
-  if (candidates.length === 0) throw new Error('No scraping API keys configured');
-
-  return Promise.any(candidates);
+  // Primary: ScraperAPI (5,000/mo). Fallback: ScrapingBee (1,000/mo).
+  // Only tries ScrapingBee if ScraperAPI fails — cuts credit usage in half.
+  if (process.env.SCRAPER_API_KEY) {
+    try {
+      return await fetchViaScraperAPI(targetUrl, render);
+    } catch {
+      // ScraperAPI failed — fall through to ScrapingBee
+    }
+  }
+  if (process.env.SCRAPINGBEE_API_KEY) {
+    return fetchViaScrapingBee(targetUrl, render);
+  }
+  throw new Error('No scraping API keys configured');
 }
 
 /**
