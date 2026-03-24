@@ -209,7 +209,9 @@ async function scrapeAndCache(tracked: typeof TRACKED_WATCHES[number]): Promise<
       const median = prices[Math.floor(prices.length / 2)];
       inRange = inRange.filter((l) => l.price! >= median * 0.4 && l.price! <= median * 2.0);
     }
-    const stats = calculateMarketStats(activeListings, 500, _settings.maxPrice);
+    const prevWatch = existing?.watch || kvCached?.watch;
+    const soldData = await fetchSoldData(tracked.query, _settings.maxPrice).catch(() => ({ soldMedian: null, soldCount: 0 }));
+    const stats = calculateMarketStats(activeListings, 500, _settings.maxPrice, soldData.soldMedian, prevWatch?.marketPrice || null);
 
     if (!stats.marketPrice || inRange.length === 0) {
       if (existing) return existing;
@@ -219,8 +221,6 @@ async function scrapeAndCache(tracked: typeof TRACKED_WATCHES[number]): Promise<
 
     // Gather unique sources
     const sources = Array.from(new Set(inRange.map(l => l.source)));
-
-    const prevWatch = existing?.watch || kvCached?.watch;
     const prevHistory = existing?.priceHistory || kvCached?.priceHistory || [];
 
     const listings: Listing[] = inRange.map((l, i) => ({

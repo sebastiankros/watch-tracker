@@ -424,23 +424,92 @@ export function getMarketplaceSearchUrls(query: string) {
   };
 }
 
-export function calculateMarketStats(listings: ScrapedListing[], minPrice = 500, maxPrice = 50000) {
-  const validPrices = listings
-    .filter((l) => l.price && l.price >= minPrice && l.price <= maxPrice)
-    .map((l) => l.price as number)
-    .sort((a, b) => a - b);
+export interface MarketStats {
+  marketPrice: number | null;
+  medianPrice: number | null;
+  lowPrice: number | null;
+  highPrice: number | null;
+  sampleSize: number;
+  newPrice: number | null;       // Market price for new/unworn only
+  preOwnedPrice: number | null;  // Market price for pre-owned only
+  velocity: number;              // % change indicator: positive = rising, negative = falling
+  soldMedian: number | null;     // eBay sold median (real transaction price)
+}
+
+/**
+ * Advanced market price calculation:
+ * 1. Tighter trim (15% instead of 10%) — removes more noise
+ * 2. Volume-weighted: clusters near the mode count more
+ * 3. Condition split: separate new vs pre-owned prices
+ * 4. Optional sold data blending for ground truth
+ */
+export function calculateMarketStats(
+  listings: ScrapedListing[],
+  minPrice = 500,
+  maxPrice = 50000,
+  soldMedian: number | null = null,
+  previousPrice: number | null = null,
+): MarketStats {
+  const valid = listings.filter((l) => l.price && l.price >= minPrice && l.price <= maxPrice);
+  const validPrices = valid.map((l) => l.price as number).sort((a, b) => a - b);
 
   if (validPrices.length === 0) {
-    return { marketPrice: null, medianPrice: null, lowPrice: null, highPrice: null, sampleSize: 0 };
+    return { marketPrice: null, medianPrice: null, lowPrice: null, highPrice: null,
+      sampleSize: 0, newPrice: null, preOwnedPrice: null, velocity: 0, soldMedian };
   }
 
-  const trimStart = Math.floor(validPrices.length * 0.1);
-  const trimEnd = Math.ceil(validPrices.length * 0.9);
-  const trimmed = validPrices.length >= 5 ? validPrices.slice(trimStart, trimEnd) : validPrices;
-  const median = trimmed[Math.floor(trimmed.length / 2)];
-  const avg = Math.round(trimmed.reduce((a, b) => a + b, 0) / trimmed.length);
+  // Tighter trim: 15% from each end
+  const trimStart = Math.floor(validPrices.length * 0.15);
+  const trimEnd = Math.ceil(validPrices.length * 0.85);
+  const trimmed = validPrices.length >= 7 ? validPrices.slice(trimStart, trimEnd) : validPrices;
 
-  return { marketPrice: avg, medianPrice: median, lowPrice: validPrices[0], highPrice: validPrices[validPrices.length - 1], sampleSize: validPrices.length };
+  // Volume-weighted average: prices closer to the median get more weight
+  const rawMedian = trimmed[Math.floor(trimmed.length / 2)];
+  let weightedSum = 0;
+  let totalWeight = 0;
+  for (const price of trimmed) {
+    const distance = Math.abs(price - rawMedian) / rawMedian;
+    const weight = 1 / (1 + distance * 3); // Closer to median = higher weight
+    weightedSum += price * weight;
+    totalWeight += weight;
+  }
+  let marketPrice = Math.round(weightedSum / totalWeight);
+
+  // Blend with eBay sold data if available (70% asking, 30% sold)
+  // Sold prices are real transactions — more accurate than asking prices
+  if (soldMedian && soldMedian > 0) {
+    marketPrice = Math.round(marketPrice * 0.7 + soldMedian * 0.3);
+  }
+
+  // Condition split
+  const newListings = valid.filter(l => {
+    const c = (l.condition || '').toLowerCase();
+    return c.includes('new') || c.includes('unworn') || c.includes('sealed') || c.includes('excellent');
+  }).map(l => l.price as number).sort((a, b) => a - b);
+
+  const preOwnedListings = valid.filter(l => {
+    const c = (l.condition || '').toLowerCase();
+    return !c.includes('new') && !c.includes('unworn') && !c.includes('sealed') && !c.includes('excellent');
+  }).map(l => l.price as number).sort((a, b) => a - b);
+
+  const newPrice = newListings.length >= 3
+    ? Math.round(newListings.slice(Math.floor(newListings.length * 0.15), Math.ceil(newListings.length * 0.85))
+        .reduce((a, b) => a + b, 0) / Math.max(1, Math.ceil(newListings.length * 0.7) - Math.floor(newListings.length * 0.15)))
+    : newListings.length > 0 ? Math.round(newListings.reduce((a, b) => a + b, 0) / newListings.length) : null;
+
+  const preOwnedPrice = preOwnedListings.length >= 3
+    ? Math.round(preOwnedListings.slice(Math.floor(preOwnedListings.length * 0.15), Math.ceil(preOwnedListings.length * 0.85))
+        .reduce((a, b) => a + b, 0) / Math.max(1, Math.ceil(preOwnedListings.length * 0.7) - Math.floor(preOwnedListings.length * 0.15)))
+    : preOwnedListings.length > 0 ? Math.round(preOwnedListings.reduce((a, b) => a + b, 0) / preOwnedListings.length) : null;
+
+  // Price velocity: compare to previous price
+  const velocity = previousPrice ? Math.round(((marketPrice - previousPrice) / previousPrice) * 1000) / 10 : 0;
+
+  return {
+    marketPrice, medianPrice: rawMedian,
+    lowPrice: validPrices[0], highPrice: validPrices[validPrices.length - 1],
+    sampleSize: validPrices.length, newPrice, preOwnedPrice, velocity, soldMedian,
+  };
 }
 
 export async function scrapeWatch(query: string, maxPrice = 50000): Promise<ScrapedMarketData> {

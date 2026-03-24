@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { formatPrice, discountColor, discountBg, badgeLabel, badgeStyle, formatDealForSharing } from '@/lib/utils';
 import { cachedFetch } from '@/lib/api-cache';
-import { ExternalLinkIcon, CopyIcon, SearchIcon, SpinnerIcon } from '@/components/Icons';
+import { ExternalLinkIcon, CopyIcon, SearchIcon, SpinnerIcon, TagIcon } from '@/components/Icons';
+import { addListedWatch, isListed } from '@/lib/listed';
 import Breadcrumbs from '@/components/Breadcrumbs';
 import ScoreRing from '@/components/ScoreRing';
 import PriceBar from '@/components/PriceBar';
@@ -57,6 +58,7 @@ export default function DealsPage() {
   const [brands, setBrands] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [listedId, setListedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [brand, setBrand] = useState('');
@@ -139,6 +141,24 @@ export default function DealsPage() {
     navigator.clipboard.writeText(text);
     setCopiedId(deal.id);
     setTimeout(() => setCopiedId(null), 2000);
+  }
+
+  function listOnStore(deal: Deal) {
+    if (isListed(deal.url)) return;
+    addListedWatch({
+      dealId: deal.id,
+      watchId: deal.watchId,
+      brand: deal.brand,
+      model: deal.model,
+      reference: deal.reference,
+      sourceUrl: deal.url,
+      source: deal.source,
+      purchasePrice: deal.listingPrice,
+      listPrice: deal.marketPrice, // list at market price for profit
+      marketPrice: deal.marketPrice,
+    });
+    setListedId(deal.id);
+    setTimeout(() => setListedId(null), 2000);
   }
 
   return (
@@ -313,6 +333,13 @@ export default function DealsPage() {
                     </div>
 
                     <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => listOnStore(deal)}
+                        className={`p-1 transition ${isListed(deal.url) || listedId === deal.id ? 'text-purple-400' : 'text-gray-500 hover:text-purple-400'}`}
+                        title={isListed(deal.url) ? 'Listed on store' : 'List on my store'}
+                      >
+                        {listedId === deal.id ? <span className="text-purple-400 text-[10px] font-bold">LISTED</span> : <TagIcon className="w-3.5 h-3.5" />}
+                      </button>
                       <a href={deal.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 p-1" title="Open listing">
                         <ExternalLinkIcon className="w-3.5 h-3.5" />
                       </a>
@@ -424,10 +451,19 @@ export default function DealsPage() {
                     </div>
 
                     <div className="flex items-center justify-between pt-1 border-t border-gray-800/50">
-                      <button onClick={() => shareDeal(deal)} className="text-xs text-gray-500 hover:text-white flex items-center gap-1">
-                        <CopyIcon className="w-3 h-3" />
-                        {copiedId === deal.id ? 'Copied!' : 'Share'}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => shareDeal(deal)} className="text-xs text-gray-500 hover:text-white flex items-center gap-1">
+                          <CopyIcon className="w-3 h-3" />
+                          {copiedId === deal.id ? 'Copied!' : 'Share'}
+                        </button>
+                        <button
+                          onClick={() => listOnStore(deal)}
+                          className={`text-xs flex items-center gap-1 ${isListed(deal.url) || listedId === deal.id ? 'text-purple-400' : 'text-gray-500 hover:text-purple-400'}`}
+                        >
+                          <TagIcon className="w-3 h-3" />
+                          {isListed(deal.url) || listedId === deal.id ? 'Listed' : 'List'}
+                        </button>
+                      </div>
                       <a href={deal.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 font-medium text-sm inline-flex items-center gap-1">
                         View <ExternalLinkIcon className="w-3 h-3" />
                       </a>
