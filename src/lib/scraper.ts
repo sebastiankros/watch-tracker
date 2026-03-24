@@ -16,20 +16,15 @@ export interface ScrapedMarketData {
   scrapedAt: string;
 }
 
-const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || '';
-const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || '';
-
 /**
  * Fetch via ScraperAPI using native fetch()
+ * Uses direct string interpolation (not URLSearchParams) to avoid encoding issues with API keys.
  */
 async function fetchViaScraperAPI(targetUrl: string, render: boolean): Promise<string> {
-  if (!SCRAPER_API_KEY) throw new Error('No SCRAPER_API_KEY');
-  const params = new URLSearchParams({
-    api_key: SCRAPER_API_KEY,
-    url: targetUrl,
-    ...(render ? { render: 'true' } : {}),
-  });
-  const proxyUrl = `https://api.scraperapi.com?${params.toString()}`;
+  const key = process.env.SCRAPER_API_KEY || '';
+  if (!key) throw new Error('No SCRAPER_API_KEY');
+  const renderParam = render ? '&render=true' : '';
+  const proxyUrl = `https://api.scraperapi.com?api_key=${key}&url=${encodeURIComponent(targetUrl)}${renderParam}`;
   const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`ScraperAPI ${res.status}`);
   return res.text();
@@ -37,15 +32,13 @@ async function fetchViaScraperAPI(targetUrl: string, render: boolean): Promise<s
 
 /**
  * Fetch via ScrapingBee using native fetch()
+ * Uses direct string interpolation (not URLSearchParams) to avoid encoding issues with API keys.
  */
 async function fetchViaScrapingBee(targetUrl: string, render: boolean): Promise<string> {
-  if (!SCRAPINGBEE_API_KEY) throw new Error('No SCRAPINGBEE_API_KEY');
-  const params = new URLSearchParams({
-    api_key: SCRAPINGBEE_API_KEY,
-    url: targetUrl,
-    ...(render ? { render_js: 'true' } : { render_js: 'false' }),
-  });
-  const proxyUrl = `https://app.scrapingbee.com/api/v1/?${params.toString()}`;
+  const key = process.env.SCRAPINGBEE_API_KEY || '';
+  if (!key) throw new Error('No SCRAPINGBEE_API_KEY');
+  const renderParam = render ? '&render_js=true' : '&render_js=false';
+  const proxyUrl = `https://app.scrapingbee.com/api/v1/?api_key=${key}&url=${encodeURIComponent(targetUrl)}${renderParam}`;
   const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`ScrapingBee ${res.status}`);
   return res.text();
@@ -56,8 +49,8 @@ async function fetchViaScrapingBee(targetUrl: string, render: boolean): Promise<
  */
 async function fetchViaProxy(targetUrl: string, render = false): Promise<string> {
   const candidates: Promise<string>[] = [];
-  if (SCRAPER_API_KEY) candidates.push(fetchViaScraperAPI(targetUrl, render));
-  if (SCRAPINGBEE_API_KEY) candidates.push(fetchViaScrapingBee(targetUrl, render));
+  if (process.env.SCRAPER_API_KEY) candidates.push(fetchViaScraperAPI(targetUrl, render));
+  if (process.env.SCRAPINGBEE_API_KEY) candidates.push(fetchViaScrapingBee(targetUrl, render));
 
   if (candidates.length === 0) throw new Error('No scraping API keys configured');
 
@@ -396,7 +389,7 @@ export async function scrapeJomashop(query: string, maxPrice = 50000): Promise<S
  * All sources fire simultaneously to minimize wall time.
  */
 export async function scrapeAllMarketplaces(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
-  if (!SCRAPER_API_KEY && !SCRAPINGBEE_API_KEY) return [];
+  if (!process.env.SCRAPER_API_KEY && !process.env.SCRAPINGBEE_API_KEY) return [];
 
   // Fire Chrono24 + eBay in parallel — both use render=false so ~3s each
   const [c24, ebay] = await Promise.all([
