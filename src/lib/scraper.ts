@@ -1,6 +1,3 @@
-import * as http from 'http';
-import * as https from 'https';
-
 export interface ScrapedListing {
   title: string;
   price: number | null;
@@ -22,77 +19,48 @@ export interface ScrapedMarketData {
 const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || '';
 const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || '';
 
-// Track which provider to use — rotate on failure
-let preferredProvider: 'scraperapi' | 'scrapingbee' = 'scraperapi';
-
 /**
- * Fetch via ScraperAPI
+ * Fetch via ScraperAPI using native fetch()
  */
-function fetchViaScraperAPI(targetUrl: string, render: boolean, timeoutMs = 15000): Promise<string> {
-  if (!SCRAPER_API_KEY) return Promise.reject(new Error('No SCRAPER_API_KEY'));
+async function fetchViaScraperAPI(targetUrl: string, render: boolean): Promise<string> {
+  if (!SCRAPER_API_KEY) throw new Error('No SCRAPER_API_KEY');
   const params = new URLSearchParams({
     api_key: SCRAPER_API_KEY,
     url: targetUrl,
     ...(render ? { render: 'true' } : {}),
   });
   const proxyUrl = `http://api.scraperapi.com?${params.toString()}`;
-
-  return new Promise((resolve, reject) => {
-    const req = http.get(proxyUrl, { timeout: timeoutMs }, (res) => {
-      let data = '';
-      res.on('data', (c: string) => (data += c));
-      res.on('end', () => {
-        if (res.statusCode && res.statusCode >= 400) {
-          return reject(new Error(`ScraperAPI ${res.statusCode}`));
-        }
-        resolve(data);
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
-  });
+  const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`ScraperAPI ${res.status}`);
+  return res.text();
 }
 
 /**
- * Fetch via ScrapingBee
+ * Fetch via ScrapingBee using native fetch()
  */
-function fetchViaScrapingBee(targetUrl: string, render: boolean, timeoutMs = 15000): Promise<string> {
-  if (!SCRAPINGBEE_API_KEY) return Promise.reject(new Error('No SCRAPINGBEE_API_KEY'));
+async function fetchViaScrapingBee(targetUrl: string, render: boolean): Promise<string> {
+  if (!SCRAPINGBEE_API_KEY) throw new Error('No SCRAPINGBEE_API_KEY');
   const params = new URLSearchParams({
     api_key: SCRAPINGBEE_API_KEY,
     url: targetUrl,
     ...(render ? { render_js: 'true' } : { render_js: 'false' }),
   });
   const proxyUrl = `https://app.scrapingbee.com/api/v1/?${params.toString()}`;
-
-  return new Promise((resolve, reject) => {
-    const req = https.get(proxyUrl, { timeout: timeoutMs }, (res) => {
-      let data = '';
-      res.on('data', (c: string) => (data += c));
-      res.on('end', () => {
-        if (res.statusCode && res.statusCode >= 400) {
-          return reject(new Error(`ScrapingBee ${res.statusCode}`));
-        }
-        resolve(data);
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
-  });
+  const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`ScrapingBee ${res.status}`);
+  return res.text();
 }
 
 /**
  * Race both providers in parallel — first successful response wins.
- * This avoids the 55s sequential failover that was blowing Vercel's 60s timeout.
  */
-async function fetchViaProxy(targetUrl: string, render = true): Promise<string> {
+async function fetchViaProxy(targetUrl: string, render = false): Promise<string> {
   const candidates: Promise<string>[] = [];
   if (SCRAPER_API_KEY) candidates.push(fetchViaScraperAPI(targetUrl, render));
   if (SCRAPINGBEE_API_KEY) candidates.push(fetchViaScrapingBee(targetUrl, render));
 
   if (candidates.length === 0) throw new Error('No scraping API keys configured');
 
-  // Promise.any resolves with the first fulfilled promise
   return Promise.any(candidates);
 }
 
