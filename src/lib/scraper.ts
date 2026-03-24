@@ -28,7 +28,7 @@ let preferredProvider: 'scraperapi' | 'scrapingbee' = 'scraperapi';
 /**
  * Fetch via ScraperAPI
  */
-function fetchViaScraperAPI(targetUrl: string, render: boolean, timeoutMs = 40000): Promise<string> {
+function fetchViaScraperAPI(targetUrl: string, render: boolean, timeoutMs = 15000): Promise<string> {
   if (!SCRAPER_API_KEY) return Promise.reject(new Error('No SCRAPER_API_KEY'));
   const params = new URLSearchParams({
     api_key: SCRAPER_API_KEY,
@@ -56,7 +56,7 @@ function fetchViaScraperAPI(targetUrl: string, render: boolean, timeoutMs = 4000
 /**
  * Fetch via ScrapingBee
  */
-function fetchViaScrapingBee(targetUrl: string, render: boolean, timeoutMs = 40000): Promise<string> {
+function fetchViaScrapingBee(targetUrl: string, render: boolean, timeoutMs = 15000): Promise<string> {
   if (!SCRAPINGBEE_API_KEY) return Promise.reject(new Error('No SCRAPINGBEE_API_KEY'));
   const params = new URLSearchParams({
     api_key: SCRAPINGBEE_API_KEY,
@@ -144,7 +144,9 @@ interface C24JsonLd {
 export async function scrapeChrono24(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   const encoded = encodeURIComponent(query);
   const targetUrl = `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true&usedWhere=us&priceTo=${maxPrice}&priceFrom=500`;
-  const html = await fetchViaProxy(targetUrl, true);
+  // render=false: listing data is in inline scripts, not dynamically rendered.
+  // This cuts response time from 20-30s to 2-5s and uses 1 credit instead of 10.
+  const html = await fetchViaProxy(targetUrl, false);
 
   const listings: ScrapedListing[] = [];
   const seen = new Set<string>();
@@ -268,7 +270,8 @@ export async function scrapeEbay(query: string, maxPrice = 50000): Promise<Scrap
   const encoded = encodeURIComponent(query);
   // Category 31387 = Wristwatches, LH_ItemCondition=3000 = Pre-owned, LH_PrefLoc=1 = US Only
   const targetUrl = `https://www.ebay.com/sch/31387/i.html?_nkw=${encoded}&_sop=12&LH_ItemCondition=3000&LH_PrefLoc=1&_udhi=${maxPrice}&_udlo=500`;
-  const html = await fetchViaProxy(targetUrl, true);
+  // render=false: eBay search results are server-rendered HTML
+  const html = await fetchViaProxy(targetUrl, false);
 
   const listings: ScrapedListing[] = [];
   const seen = new Set<string>();
@@ -427,16 +430,13 @@ export async function scrapeJomashop(query: string, maxPrice = 50000): Promise<S
 export async function scrapeAllMarketplaces(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
   if (!SCRAPER_API_KEY && !SCRAPINGBEE_API_KEY) return [];
 
-  // Chrono24 is the primary source (60+ listings per search).
-  // Only add eBay if Chrono24 returns few results, to save API credits.
-  const c24 = await scrapeChrono24(query, maxPrice).catch(() => [] as ScrapedListing[]);
+  // Fire Chrono24 + eBay in parallel — both use render=false so ~3s each
+  const [c24, ebay] = await Promise.all([
+    scrapeChrono24(query, maxPrice).catch(() => [] as ScrapedListing[]),
+    scrapeEbay(query, maxPrice).catch(() => [] as ScrapedListing[]),
+  ]);
 
-  let secondary: ScrapedListing[] = [];
-  if (c24.length < 5) {
-    secondary = await scrapeEbay(query, maxPrice).catch(() => [] as ScrapedListing[]);
-  }
-
-  const allListings = [...c24, ...secondary];
+  const allListings = [...c24, ...ebay];
 
   // Deduplicate by cleaned URL
   const seen = new Set<string>();
