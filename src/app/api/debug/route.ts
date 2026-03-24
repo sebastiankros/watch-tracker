@@ -1,63 +1,100 @@
 import { NextResponse } from 'next/server';
+import { scrapeChrono24, scrapeEbay, calculateMarketStats } from '@/lib/scraper';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function GET() {
-  const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY || '';
-  const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY || '';
+  const startTime = Date.now();
   const query = 'Omega Speedmaster';
-  const encoded = encodeURIComponent(query);
-  const targetUrl = `https://www.chrono24.com/search/index.htm?query=${encoded}&dosearch=true&usedWhere=us&priceTo=50000&priceFrom=500`;
+  const maxPrice = 50000;
 
   const results: Record<string, unknown> = {
     startTime: new Date().toISOString(),
-    envKeys: {
-      SCRAPER_API_KEY: SCRAPER_API_KEY ? `${SCRAPER_API_KEY.slice(0, 8)}...len=${SCRAPER_API_KEY.length}` : 'MISSING',
-      SCRAPINGBEE_API_KEY: SCRAPINGBEE_API_KEY ? `${SCRAPINGBEE_API_KEY.slice(0, 8)}...len=${SCRAPINGBEE_API_KEY.length}` : 'MISSING',
-    },
+    query,
   };
 
-  // Test ScraperAPI directly
-  const scraperApiUrl = `https://api.scraperapi.com?api_key=${SCRAPER_API_KEY}&url=${encodeURIComponent(targetUrl)}`;
+  // Test Chrono24 scraper end-to-end
   const t1 = Date.now();
+  let c24Listings: Awaited<ReturnType<typeof scrapeChrono24>> = [];
   try {
-    const res = await fetch(scraperApiUrl, { signal: AbortSignal.timeout(20000) });
-    const text = await res.text();
-    results.scraperapi = {
-      status: res.status,
+    c24Listings = await scrapeChrono24(query, maxPrice);
+    results.chrono24 = {
       timeMs: Date.now() - t1,
-      bodyLength: text.length,
-      bodySnippet: text.slice(0, 500),
-      hasListings: text.includes('"price"'),
+      listingsCount: c24Listings.length,
+      first3: c24Listings.slice(0, 3).map(l => ({
+        title: l.title,
+        price: l.price,
+        source: l.source,
+        url: l.url.slice(0, 80),
+      })),
+      priceRange: c24Listings.length > 0
+        ? { min: Math.min(...c24Listings.map(l => l.price!)), max: Math.max(...c24Listings.map(l => l.price!)) }
+        : null,
     };
   } catch (e: unknown) {
-    results.scraperapi = {
-      error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
-      timeMs: Date.now() - t1,
-    };
+    results.chrono24 = { error: e instanceof Error ? e.message : String(e), timeMs: Date.now() - t1 };
   }
 
-  // Test ScrapingBee directly
-  const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${SCRAPINGBEE_API_KEY}&url=${encodeURIComponent(targetUrl)}&render_js=false`;
+  // Test eBay scraper end-to-end
   const t2 = Date.now();
+  let ebayListings: Awaited<ReturnType<typeof scrapeEbay>> = [];
   try {
-    const res = await fetch(scrapingBeeUrl, { signal: AbortSignal.timeout(20000) });
-    const text = await res.text();
-    results.scrapingbee = {
-      status: res.status,
+    ebayListings = await scrapeEbay(query, maxPrice);
+    results.ebay = {
       timeMs: Date.now() - t2,
-      bodyLength: text.length,
-      bodySnippet: text.slice(0, 500),
-      hasListings: text.includes('"price"'),
+      listingsCount: ebayListings.length,
+      first3: ebayListings.slice(0, 3).map(l => ({
+        title: l.title,
+        price: l.price,
+        source: l.source,
+        url: l.url.slice(0, 80),
+      })),
+      priceRange: ebayListings.length > 0
+        ? { min: Math.min(...ebayListings.map(l => l.price!)), max: Math.max(...ebayListings.map(l => l.price!)) }
+        : null,
     };
   } catch (e: unknown) {
-    results.scrapingbee = {
-      error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
-      timeMs: Date.now() - t2,
-    };
+    results.ebay = { error: e instanceof Error ? e.message : String(e), timeMs: Date.now() - t2 };
   }
 
-  results.totalTimeMs = Date.now() - t1;
+  // Calculate market stats from combined listings
+  const allListings = [...c24Listings, ...ebayListings];
+  const stats = calculateMarketStats(allListings, 500, maxPrice);
+
+  // Find deals (listings below market price)
+  let dealCount = 0;
+  const sampleDeals: unknown[] = [];
+  if (stats.marketPrice) {
+    for (const l of allListings) {
+      if (l.price && l.price < stats.marketPrice) {
+        dealCount++;
+        if (sampleDeals.length < 3) {
+          const discount = ((stats.marketPrice - l.price) / stats.marketPrice * 100).toFixed(1);
+          sampleDeals.push({
+            title: l.title,
+            price: l.price,
+            marketPrice: stats.marketPrice,
+            discount: `${discount}%`,
+            savings: stats.marketPrice - l.price,
+            source: l.source,
+          });
+        }
+      }
+    }
+  }
+
+  results.combined = {
+    totalListings: allListings.length,
+    marketPrice: stats.marketPrice,
+    medianPrice: stats.medianPrice,
+    lowPrice: stats.lowPrice,
+    highPrice: stats.highPrice,
+    sampleSize: stats.sampleSize,
+    dealCount,
+    sampleDeals,
+  };
+
+  results.totalTimeMs = Date.now() - startTime;
   return NextResponse.json(results);
 }
