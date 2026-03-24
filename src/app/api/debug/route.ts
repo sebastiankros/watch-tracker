@@ -79,6 +79,28 @@ export async function GET() {
     results.ebayFunction = { error: errMsg, timeMs: Date.now() - t2 };
   }
 
+  // Test 4: Deals from store
+  const t3 = Date.now();
+  try {
+    const store = await import('@/lib/store');
+    const dealsData = await store.getDeals({ minDiscount: 0, maxPrice: 50000 });
+    results.deals = {
+      timeMs: Date.now() - t3,
+      totalDeals: dealsData.deals.length,
+      stats: dealsData.stats,
+      first5: dealsData.deals.slice(0, 5).map(d => ({
+        watch: `${d.brand} ${d.model}`,
+        price: d.listingPrice,
+        market: d.marketPrice,
+        discount: d.discount,
+        source: d.source,
+        score: d.dealScore,
+      })),
+    };
+  } catch (e: unknown) {
+    results.deals = { error: e instanceof Error ? e.message : String(e), timeMs: Date.now() - t3 };
+  }
+
   results.totalTimeMs = Date.now() - t0;
   return NextResponse.json(results);
 }
