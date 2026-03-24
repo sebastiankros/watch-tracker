@@ -378,22 +378,28 @@ export async function scrapeJomashop(query: string, maxPrice = 50000): Promise<S
 // ===== Combined =====
 
 /**
- * Scrape all marketplaces in parallel.
- * Chrono24 + eBay always fire. Watchfinder + Jomashop fire if we have budget.
- * Each source uses 1 API credit (render=false).
+ * Scrape marketplaces. Default: Chrono24 only (1 credit per watch).
+ * Pass allSources=true for full sweep (4 credits per watch) — used during manual refresh.
  */
-export async function scrapeAllMarketplaces(query: string, maxPrice = 50000): Promise<ScrapedListing[]> {
+export async function scrapeAllMarketplaces(query: string, maxPrice = 50000, allSources = false): Promise<ScrapedListing[]> {
   if (!process.env.SCRAPER_API_KEY && !process.env.SCRAPINGBEE_API_KEY) return [];
 
-  // Fire all 4 sources in parallel — each takes ~1-5s with render=false
-  const [c24, ebay, wf, joma] = await Promise.all([
+  // Chrono24 always fires (primary source, ~57 listings per query)
+  const promises: Promise<ScrapedListing[]>[] = [
     scrapeChrono24(query, maxPrice).catch(() => [] as ScrapedListing[]),
-    scrapeEbay(query, maxPrice).catch(() => [] as ScrapedListing[]),
-    scrapeWatchfinder(query, maxPrice).catch(() => [] as ScrapedListing[]),
-    scrapeJomashop(query, maxPrice).catch(() => [] as ScrapedListing[]),
-  ]);
+  ];
 
-  const allListings = [...c24, ...ebay, ...wf, ...joma];
+  // Additional sources only when requested (manual refresh) to save credits
+  if (allSources) {
+    promises.push(
+      scrapeEbay(query, maxPrice).catch(() => [] as ScrapedListing[]),
+      scrapeWatchfinder(query, maxPrice).catch(() => [] as ScrapedListing[]),
+      scrapeJomashop(query, maxPrice).catch(() => [] as ScrapedListing[]),
+    );
+  }
+
+  const results = await Promise.all(promises);
+  const allListings = results.flat();
 
   // Deduplicate by cleaned URL
   const seen = new Set<string>();
