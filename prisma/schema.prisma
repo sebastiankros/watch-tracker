@@ -78,6 +78,19 @@ model Settings {
   alertEmail       String @default("")
 }
 
+model MarketingPost {
+  id        String   @id @default(cuid())
+  watchId   String?
+  brand     String?
+  model     String?
+  platform  String   // "instagram", "x", "whatsapp", "facebook"
+  content   String
+  type      String   // "deal", "spotlight", "educational", "custom"
+  status    String   @default("draft") // "draft", "posted"
+  createdAt DateTime @default(now())
+  postedAt  DateTime?
+}
+
 model SoldRecord {
   id        String   @id @default(cuid())
   reference String

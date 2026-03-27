@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SettingsIcon, LogoutIcon, WatchIcon, SearchIcon, PortfolioIcon, ListedIcon } from './Icons';
+import { DashboardIcon, DealsIcon, MarketIcon, AlertIcon, SettingsIcon, LogoutIcon, WatchIcon, SearchIcon, PortfolioIcon, ListedIcon, MarketingIcon } from './Icons';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', Icon: DashboardIcon },
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/market', label: 'Market Prices', Icon: MarketIcon },
   { href: '/listed', label: 'Listed', Icon: ListedIcon, badge: 'NEW' },
   { href: '/portfolio', label: 'Portfolio', Icon: PortfolioIcon },
+  { href: '/marketing', label: 'Marketing', Icon: MarketingIcon, badge: 'NEW' },
   { href: '/alerts', label: 'Alerts', Icon: AlertIcon },
   { href: '/settings', label: 'Settings', Icon: SettingsIcon },
 ];
